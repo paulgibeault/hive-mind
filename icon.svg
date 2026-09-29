@@ -12,7 +12,7 @@
     <path id="h" d="M0-64L55.4-32V32L0 64-55.4 32V-32z"/>
   </defs>
   <rect width="512" height="512" fill="url(#bg)"/>
-  <!-- seven cells: six capped, the middle one opened on a wasp -->
+  <!-- seven cells: six capped, the middle one opened on a sleeping guard -->
   <g transform="translate(256 262)">
     <use href="#h" transform="translate(-114 0)" fill="url(#cap)"/>
     <use href="#h" transform="translate(114 0)" fill="url(#cap)"/>
@@ -22,17 +22,25 @@
     <use href="#h" transform="translate(57 99)" fill="#3b2b19"/>
     <use href="#h" fill="#3b2b19"/>
     <text x="57" y="99" dy="0.36em" text-anchor="middle" font-family="system-ui, sans-serif" font-weight="800" font-size="72" fill="#f6ead2">1</text>
-    <g transform="rotate(-28)">
-      <ellipse cx="-12" cy="-26" rx="22" ry="12" transform="rotate(-35 -12 -26)" fill="#f6ead2" opacity="0.6"/>
-      <ellipse cx="14" cy="-26" rx="22" ry="12" transform="rotate(35 14 -26)" fill="#f6ead2" opacity="0.6"/>
-      <clipPath id="body"><ellipse cx="4" cy="0" rx="38" ry="22"/></clipPath>
-      <ellipse cx="4" cy="0" rx="38" ry="22" fill="#f5c542"/>
-      <g clip-path="url(#body)" fill="#2a1d10">
-        <rect x="-10" y="-30" width="9" height="60"/>
-        <rect x="10" y="-30" width="9" height="60"/>
-        <rect x="29" y="-30" width="9" height="60"/>
+    <g>
+      <ellipse cx="-22" cy="-30" rx="18" ry="11" transform="rotate(-28 -22 -30)" fill="#f6ead2" opacity="0.6"/>
+      <ellipse cx="22" cy="-30" rx="18" ry="11" transform="rotate(28 22 -30)" fill="#f6ead2" opacity="0.6"/>
+      <g fill="#f5c542">
+        <circle cx="36" cy="0" r="7"/><circle cx="33" cy="14" r="7"/><circle cx="24" cy="25" r="7"/>
+        <circle cx="10" cy="32" r="7"/><circle cx="-10" cy="32" r="7"/><circle cx="-24" cy="25" r="7"/>
+        <circle cx="-33" cy="14" r="7"/><circle cx="-36" cy="0" r="7"/><circle cx="-33" cy="-14" r="7"/>
+        <circle cx="33" cy="-14" r="7"/><circle cx="-24" cy="-25" r="7"/><circle cx="24" cy="-25" r="7"/>
       </g>
-      <circle cx="-36" cy="0" r="14" fill="#2a1d10"/>
+      <clipPath id="body"><ellipse cx="0" cy="0" rx="38" ry="35"/></clipPath>
+      <ellipse cx="0" cy="0" rx="38" ry="35" fill="#f5c542"/>
+      <g clip-path="url(#body)" fill="#2a1d10" opacity="0.75">
+        <rect x="-40" y="5" width="80" height="7"/>
+        <rect x="-40" y="21" width="80" height="7"/>
+      </g>
+      <g fill="none" stroke="#2a1d10" stroke-width="3.5" stroke-linecap="round">
+        <path d="M-19 -11a7 7 0 0 0 12 0"/>
+        <path d="M7 -11a7 7 0 0 0 12 0"/>
+      </g>
     </g>
   </g>
 </svg>
