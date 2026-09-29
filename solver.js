@@ -7,7 +7,8 @@
  * Every hidden cell carries a DOMAIN: a bitmask of what it might still be —
  * SAFE, GUARD, QUEEN (a queen's guard). A clue is a revealed cell's reading
  * of its neighbours, { guards: a, queens: b }: exactly a guards and b queen's
- * guards. Broken comb has no clue at all (clueAt → null). The solver narrows domains until nothing more follows. It works a
+ * guards. Broken comb has no clue at all (clueAt → null). The solver narrows
+ * domains until nothing more follows. It works a
  * connected group of hidden cells at a time and enumerates every assignment
  * consistent with the clues touching it; whatever holds in all of them is
  * known. Enumeration is capped by a node budget (not a clock), so the answer
