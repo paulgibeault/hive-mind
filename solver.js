@@ -5,21 +5,20 @@
  * two players' pooled clues.
  *
  * Every hidden cell carries a DOMAIN: a bitmask of what it might still be —
- * SAFE, WASP, HORNET. A clue is a revealed cell's reading of its neighbours:
- *   plain    { wasps: a, hornets: b }   exactly a wasps and b hornets
- *   cracked  { total: d }               the true total is d − 1 or d + 1
- * The solver narrows domains until nothing more follows. It works a
+ * SAFE, GUARD, QUEEN (a queen's guard). A clue is a revealed cell's reading
+ * of its neighbours, { guards: a, queens: b }: exactly a guards and b queen's
+ * guards. Broken comb has no clue at all (clueAt → null). The solver narrows domains until nothing more follows. It works a
  * connected group of hidden cells at a time and enumerates every assignment
  * consistent with the clues touching it; whatever holds in all of them is
  * known. Enumeration is capped by a node budget (not a clock), so the answer
  * is the same on every device.
  */
 
-export const SAFE = 1, WASP = 2, HORNET = 4;
+export const SAFE = 1, GUARD = 2, QUEEN = 4;
 const BUDGET = 60000;
 
-const kindOf = (bit) => (bit === WASP ? 1 : bit === HORNET ? 2 : 0);
-const single = (m) => m === SAFE || m === WASP || m === HORNET;
+const kindOf = (bit) => (bit === GUARD ? 1 : bit === QUEEN ? 2 : 0);
+const single = (m) => m === SAFE || m === GUARD || m === QUEEN;
 
 /**
  * Deduce as far as possible.
@@ -116,7 +115,7 @@ function enumerate(group, nbrs, dom, clueAt, opened) {
   const cluesOf = order.map(() => []);
   clues.forEach((q, qi) => q.slots.forEach((s) => cluesOf[s].push(qi)));
 
-  const val = new Int8Array(order.length);            // 0 safe, 1 wasp, 2 hornet
+  const val = new Int8Array(order.length);            // 0 safe, 1 guard, 2 queen
   const cw = clues.map((q) => q.w), ch = clues.map((q) => q.h), left = clues.map((q) => q.slots.length);
   const seen = new Uint8Array(order.length);
   const full = order.map((j) => dom[j]);
@@ -124,25 +123,21 @@ function enumerate(group, nbrs, dom, clueAt, opened) {
 
   const ok = (qi) => {
     const q = clues[qi].clue, w = cw[qi], h = ch[qi], u = left[qi];
-    if ('total' in q) {
-      const t = w + h;
-      return (t <= q.total - 1 && q.total - 1 <= t + u) || (t <= q.total + 1 && q.total + 1 <= t + u);
-    }
-    return w <= q.wasps && h <= q.hornets && (q.wasps - w) + (q.hornets - h) <= u;
+    return w <= q.guards && h <= q.queens && (q.guards - w) + (q.queens - h) <= u;
   };
 
   const step = (k) => {
     if (++nodes > BUDGET) return false;
     if (k === order.length) {
       for (let s = 0; s < order.length; s++) {
-        const bit = val[s] === 0 ? SAFE : val[s] === 1 ? WASP : HORNET;
+        const bit = val[s] === 0 ? SAFE : val[s] === 1 ? GUARD : QUEEN;
         if (!(seen[s] & bit)) { seen[s] |= bit; if (seen[s] === full[s]) saturated++; }
       }
       return saturated < order.length;              // nothing left to learn → stop
     }
     const m = dom[order[k]];
     for (const v of [0, 1, 2]) {
-      if (!(m & (v === 0 ? SAFE : v === 1 ? WASP : HORNET))) continue;
+      if (!(m & (v === 0 ? SAFE : v === 1 ? GUARD : QUEEN))) continue;
       val[k] = v;
       let good = true;
       for (const qi of cluesOf[k]) {

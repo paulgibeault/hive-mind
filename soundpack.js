@@ -7,15 +7,16 @@
 // ── a wooden hive box, a frame lifted out ───────────────────────────────
 // The materials are WAX (a cap breaking: a small dry crack), HONEY (what an
 // opening sounds like: soft drops), WOOD (the frame, knocked — the only
-// pitched thing here) and the WASPS (a buzz; the one thing that is alarming).
+// pitched thing here) and the GUARDS (a waking buzz; the one thing that is
+// alarming).
 //
 // Contour grammar follows the fleet: rising is good, falling is over.
 //
 //   uncap    one cell opened              a wax crack and a drop
 //   flood    an opening spreads           cracks, and drops rising with its size
-//   mark     a pin goes in                a tiny click, higher for a hornet
+//   mark     a pin goes in                a tiny click, higher for a queen's guard
 //   unmark   the pin comes out            a softer, lower click
-//   sting    you uncapped a wasp          a buzz swelling, and a thud
+//   sting    you uncapped a guard         a buzz swelling, and a thud
 //   won      the frame is cleared         the frame knocked, three rising notes
 
 (function (global) {
@@ -62,16 +63,16 @@
       return 0.12 + n * 0.05;
     },
     'mark': function (ctx, o, t, p, r) {
-      const hornet = p && p.kind === 2;
-      return S.chirp(ctx, o, t, { f: hornet ? 2900 : 2300, pulses: hornet ? 2 : 1, step: 0.035, gain: 0.05 });
+      const queen = p && p.kind === 2;
+      return S.chirp(ctx, o, t, { f: queen ? 2900 : 2300, pulses: queen ? 2 : 1, step: 0.035, gain: 0.05 });
     },
     'unmark': function (ctx, o, t, p, r) {
       return S.rustle(ctx, o, t, { dur: 0.035, f0: 1500, f1: 1100, Q: 1.4, gain: 0.04, attack: 0.004, seed: seed(r) });
     },
     'sting': function (ctx, o, t, p, r) {
-      const hornet = p && p.kind === 2;
-      S.drone(ctx, o, t, 0.7, { f: hornet ? 150 : 210, detune: 60, type: 'sawtooth', lp: 1800, fade: 0.12, gain: 0.07 });
-      S.drone(ctx, o, t + 0.05, 0.6, { f: hornet ? 301 : 421, detune: 40, type: 'sawtooth', lp: 2600, fade: 0.1, gain: 0.03 });
+      const queen = p && p.kind === 2;
+      S.drone(ctx, o, t, 0.7, { f: queen ? 150 : 210, detune: 60, type: 'sawtooth', lp: 1800, fade: 0.12, gain: 0.07 });
+      S.drone(ctx, o, t + 0.05, 0.6, { f: queen ? 301 : 421, detune: 40, type: 'sawtooth', lp: 2600, fade: 0.1, gain: 0.03 });
       S.thump(ctx, o, t + 0.12, { f0: 110, f1: 45, dur: 0.35, attack: 0.01, gain: 0.2, seed: seed(r) });
       return 0.8;
     },
