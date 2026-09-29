@@ -1,0 +1,15 @@
+{
+  "name": "hive-mind",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Hive Mind — honeycomb minesweeper where every frame is fair.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node tools/verify-artifact.mjs && node --test 'tests/*.test.js'",
+    "stage": "node tools/stage.mjs dist",
+    "e2e": "node tools/e2e.mjs"
+  }
+}

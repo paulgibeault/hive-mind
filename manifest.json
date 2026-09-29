@@ -1,0 +1,15 @@
+{
+  "name": "Hive Mind",
+  "short_name": "Hive Mind",
+  "description": "Uncap every safe cell of the honeycomb. Leave the wasps asleep.",
+  "scope": "/hive-mind/",
+  "start_url": "/hive-mind/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#17110a",
+  "theme_color": "#17110a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

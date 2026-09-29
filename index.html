@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#17110a">
+  <title>Hive Mind</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- The Arcade SDK, root-relative and evergreen (GAME_INTEGRATION §2), then
+       the audio element library and the sound pack built from it. -->
+  <script src="/arcade-sdk.js"></script>
+  <script src="/arcade-audio.js"></script>
+  <script src="soundpack.js"></script>
+  <script>
+    Arcade.init({ gameId: 'hive-mind' });
+  </script>
+</head>
+<body>
+  <main class="stage" id="stage">
+    <canvas id="view" aria-label="The frame of honeycomb"></canvas>
+
+    <header class="rail" id="rail" hidden>
+      <div class="rail-id">
+        <span class="mono eyebrow" id="hud-hive">Meadow</span>
+        <span class="mono code" id="hud-code"></span>
+      </div>
+      <div class="rail-count" id="hud-count" aria-live="polite"></div>
+      <span class="mono clock" id="hud-clock">0:00</span>
+      <button class="tool" id="tool" type="button" aria-pressed="false" aria-label="Tap marks instead of uncapping">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 21V4l11 5-11 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="tool" id="pause" type="button" aria-label="Pause">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+
+    <section class="sheet menu" id="menu" hidden>
+      <header class="masthead">
+        <svg class="crest" viewBox="0 0 64 64" aria-hidden="true"><use href="#comb"/></svg>
+        <h1>Hive Mind</h1>
+        <p class="lede">Uncap every safe cell. Leave the wasps asleep.</p>
+      </header>
+
+      <button class="strip" id="continue" type="button" hidden>
+        <span><span class="mono eyebrow" id="continue-note">In the smoker</span><span class="strip-title" id="continue-title">Back to the frame</span></span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+
+      <div class="field">
+        <span class="label mono" id="hive-label">Hive</span>
+        <div class="seg" id="hive" role="radiogroup" aria-labelledby="hive-label"></div>
+        <p class="hive-note" id="hive-note"></p>
+      </div>
+
+      <button class="primary" id="play" type="button">Uncap a frame</button>
+      <button class="strip daily" id="daily" type="button">
+        <span><span class="mono eyebrow" id="daily-note">Daily frame</span><span class="strip-title" id="daily-title">Today's frame</span></span>
+        <span class="mono daily-time" id="daily-time"></span>
+      </button>
+      <p class="best mono" id="best"></p>
+
+      <details class="how">
+        <summary>How it works</summary>
+        <ul>
+          <li><b>Tap</b> a capped cell to uncap it. Its number counts the wasps in the six cells around it.</li>
+          <li><b>Long-press</b> (or right-click) to mark a cell you think hides a wasp. The flag button makes taps mark.</li>
+          <li>Tap a number whose marks are all placed to uncap the rest around it.</li>
+          <li>Every frame can be finished <b>without guessing</b>. If you're stuck, there's something you haven't noticed yet.</li>
+          <li><b>Orchard</b> hides hornets too. Cells count each kind separately: <span class="k-w">amber</span> for wasps, <span class="k-h">red, boxed</span> for hornets. Long-press twice to mark a hornet.</li>
+          <li><b>Wild</b> comb is cracked in places. A cracked cell's number is <b>off by exactly one</b>, up or down.</li>
+        </ul>
+      </details>
+
+      <details class="how" id="code-box">
+        <summary>Play a frame code</summary>
+        <form class="code-form" id="code-form">
+          <input id="code-in" class="mono" autocomplete="off" spellcheck="false" placeholder="ME-00A1B2C" aria-label="Frame code">
+          <button type="submit" class="ghost">Open</button>
+        </form>
+        <p class="hive-note">Same code, same frame, on any phone. Race a friend.</p>
+      </details>
+    </section>
+
+    <section class="sheet small" id="paused" hidden>
+      <h2>Smoke's out</h2>
+      <p class="lede">The clock is stopped.</p>
+      <button class="primary" id="resume" type="button">Back to the frame</button>
+      <button class="ghost" id="quit" type="button">Leave the hive</button>
+    </section>
+
+    <section class="sheet dock" id="won" hidden>
+      <span class="mono eyebrow" id="won-note"></span>
+      <h2>Honey taken</h2>
+      <p class="result mono"><span id="won-time"></span><span class="result-best" id="won-best"></span></p>
+      <p class="mono code-line">Frame <b id="won-code"></b></p>
+      <div class="row">
+        <button class="primary" id="again" type="button">New frame</button>
+        <button class="ghost" id="won-menu" type="button">Menu</button>
+      </div>
+    </section>
+
+    <section class="sheet dock" id="lost" hidden>
+      <span class="mono eyebrow" id="lost-note"></span>
+      <h2 id="lost-title">Stung</h2>
+      <p class="result plain" id="lost-left"></p>
+      <div class="row">
+        <button class="primary" id="retry" type="button">Same frame again</button>
+        <button class="ghost" id="lost-new" type="button">New frame</button>
+      </div>
+      <button class="ghost" id="lost-menu" type="button">Menu</button>
+    </section>
+  </main>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <g id="comb">
+        <path d="M32 6l13 7.5v15L32 36l-13-7.5v-15z" fill="#f2b33d"/>
+        <path d="M18 30l13 7.5v15L18 60 5 52.5v-15z" fill="#c9801a"/>
+        <path d="M46 30l13 7.5v15L46 60l-13-7.5v-15z" fill="#3b2b19" stroke="#f2b33d" stroke-width="2"/>
+      </g>
+    </defs>
+  </svg>
+
+  <script type="module" src="main.js"></script>
+
+  <!-- Offline play. Loopback-guarded so local edits are never masked by a
+       stale cache (matches the launcher). -->
+  <script>
+    if ('serviceWorker' in navigator &&
+        !/^(127\.|localhost$|0\.0\.0\.0$|::1$)/.test(location.hostname)) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js', { scope: '/hive-mind/' })
+          .catch((err) => console.warn('SW registration failed:', err));
+      });
+    }
+  </script>
+</body>
+</html>
