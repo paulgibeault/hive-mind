@@ -12,6 +12,13 @@
  *   daily    Arcade.stats('daily') entries' hive
  * Where an old and a new entry both exist, the better one is kept.
  *
+ * v2 → v3 (#08, the smoker): a run gains `puffs`, the smoker puffs it has
+ * left, and from v3 a stung run is kept so a reload can still puff. Every
+ * v2 run was a plain frame that hadn't used the smoker (there was none), so
+ * it gets the one puff every hive gives: puffs = 1. A v2 save only ever held
+ * a run in play (a sting or a clear dropped it); anything else is not one the
+ * game wrote and is let go. A v1 run takes both steps.
+ *
  * Clean reads (#03) added fields, not a format: a run's `reads` counters, a
  * frames entry's `pure` count, a daily entry's `pure` flag and the
  * pure-time-<id> records. Nothing older has them and nothing here invents
@@ -20,7 +27,7 @@
  * counts an entry carries.
  */
 
-import { HIVES, OLD_IDS, SAVE_V, G, Q, nbrsOf, solvable } from './core.js';
+import { HIVES, OLD_IDS, G, Q, nbrsOf, solvable } from './core.js';
 
 const newId = (id) => (Object.hasOwn(OLD_IDS, id) ? OLD_IDS[id] : id);
 const hiveOf = (id) => HIVES.find((h) => h.id === newId(id)) || null;
@@ -35,12 +42,27 @@ export const recordKeys = () =>
 const KEPT = ['cols', 'rows', 'cells', 'shown', 'shownH', 'start', 'seed', 'tries',
   'open', 'mark', 'phase', 'stung', 'moves', 'events'];
 
-/** One saved game state, v1 → v2. Null when it can't come across. */
+// what a run from before the smoker starts with: no hive had more then
+const PUFFS_V2 = 1;
+
+/** One saved game state, brought up to SAVE_V. Null when it can't come across. */
 export function migrateState(s) {
-  if (!s || s.v !== 1) return s;
+  if (!s || (s.v !== 1 && s.v !== 2)) return s;
+  const v2 = s.v === 1 ? v1to2(s) : s;
+  return v2 && v2to3(v2);
+}
+
+/* v2 → v3: the smoker's puffs. Only a run in play was ever saved. */
+function v2to3(s) {
+  if (s.phase !== 'play') return null;
+  return { ...s, v: 3, puffs: PUFFS_V2 };
+}
+
+/* v1 → v2: the renames, guards, and broken comb. */
+function v1to2(s) {
   const hive = hiveOf(s.hive);
   if (!hive) return null;
-  const out = { v: SAVE_V, hive: hive.id };
+  const out = { v: 2, hive: hive.id };
   for (const k of KEPT) if (k in s) out[k] = s[k];
   if (!Array.isArray(out.cells)) return null;
   out.guards = out.cells.filter((c) => c === G).length;
@@ -75,7 +97,7 @@ function better(a, b) {
 export function migrate({ run = null, records = {}, frames = {}, daily = {} } = {}) {
   const out = { run: undefined, records: {}, dropRecords: [], frames: null, daily: null };
 
-  if (run && run.s && run.s.v === 1) {
+  if (run && run.s && (run.s.v === 1 || run.s.v === 2)) {
     const s = migrateState(run.s);
     out.run = s ? { ...run, s } : null;
   }

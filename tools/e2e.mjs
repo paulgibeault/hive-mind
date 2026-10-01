@@ -86,7 +86,7 @@ assert.deepEqual(await H(() => {
   const run = Arcade.state.get('run');
   return [run.s.v, run.s.hive, run.s.queens, 'hornets' in run.s, Arcade.records.get('time-orchard'),
     Arcade.records.get('time-apple').value, Arcade.stats.get('frames'), Arcade.stats.get('daily')['2026-09-01'].hive];
-}), [2, 'apple', 13, false, null, 52100, { apple: { played: 3, won: 1 } }, 'apple']);
+}), [3, 'apple', 13, false, null, 52100, { apple: { played: 3, won: 1 } }, 'apple']);
 assert.equal(await page.textContent('#continue-title'), 'Back to the Apple Orchard frame');
 await shot('1-menu');
 
@@ -187,7 +187,19 @@ assert.deepEqual(await H(() => window.__hive.view.rings), [{ i: safeBefore[0], c
 await page.waitForTimeout(500);
 assert.ok(await ringsClear(), 'the sheet does not cover the rings');
 await shot('4-stung');
-assert.equal(await H(() => Arcade.state.get('run')), null, 'a stung frame is not resumable');
+// with a puff left, the stung run is kept for the smoker (#08), lesson and all
+assert.deepEqual(await H(() => { const r = Arcade.state.get('run'); return [r.s.phase, r.s.stung, r.s.puffs, r.lesson.kind]; }),
+  ['lost', guard, 1, 'guess']);
+assert.equal(await page.isVisible('#puff'), true);
+assert.equal(await page.textContent('#puff'), 'Puff the smoker · +20 s · 1 left');
+assert.equal(await page.getAttribute('#retry', 'class'), 'ghost', 'the smoker is the primary');
+// and while it can be calmed, the stung board shows only the guard that stung
+assert.equal(await H(() => {
+  const h = window.__hive, { x, y } = h.at(h.s.cells.findIndex((c, i) => c === 1 && i !== h.s.stung));
+  const cv = document.getElementById('view'), d = cv.width / cv.clientWidth;
+  const px = cv.getContext('2d').getImageData(Math.round(x * d), Math.round((y - h.layout.r * 0.5) * d), 1, 1).data;
+  return px[0] > 180 && px[1] > 110;      // honey wax, not dark open comb
+}), true, 'other guards stay capped');
 const seed = await H(() => window.__hive.s.seed);
 await page.click('#retry');
 await waitMode('play');
@@ -225,6 +237,10 @@ await shot('4-stung-wrong-mark');
 // the pinned example (Clover Field seed 7, the canvas's mid-game state):
 // tapping 49 is the proven-guard case, ringed by [48] — and with reduced
 // motion the rings are simply there, no fade
+// (leave the stung sheet by Menu first: a stung run with a puff left is
+// kept, and the reload's suspend would write it over the one set below)
+await page.click('#lost-menu');
+assert.equal(await H(() => Arcade.state.get('run')), null, 'Menu lets the stung run go');
 await page.emulateMedia({ reducedMotion: 'reduce' });
 await H(() => {
   const PLAY_PROPOSED = 'cccwwcccwccwwcccwcccwccccccccccwwwcwccwc3cwcccwc1m22wccc11011ccc110001mcw10001cccc11001mccw101ccccm201w1cc100110cm100000';
@@ -478,6 +494,95 @@ assert.equal(await H(() => Arcade.stats.get('frames').clover.pure), pureBefore +
 await page.waitForTimeout(400);
 await shot('12-won-assisted');
 await page.click('#won-menu');
+
+// ── the smoker (#08): sting → reload → puff → continue → win ──────────
+// On today's daily (dailies allow it), with its records cleared so a smoked
+// clear is the one to set them.
+await H(() => { window.__hive.view.motion = true; });
+const sm = await H(() => window.__hive.today());
+const pureCount = () => H((id) => ((Arcade.stats.get('frames') || {})[id] || {}).pure || 0, sm.hive);
+await H((t) => {
+  Arcade.stats.update('daily', (log) => { const next = { ...log }; delete next[t.date]; return next; });
+  Arcade.records.clear(`time-${t.hive}`);
+  Arcade.records.clear(`pure-time-${t.hive}`);
+}, sm);
+const smPure = await pureCount();
+await page.click('#daily');
+await waitMode('play');
+for (let k = 0; k < 3; k++) await tapCell((await provenSafe())[0]);
+const smGuard = await H(() => {
+  const h = window.__hive, p = h.Core.provenNow(h.s);
+  return h.s.cells.findIndex((c, i) => c !== 0 && !p.guard.has(i) && !h.s.mark[i]);
+});
+await tapCell(smGuard);
+await waitMode('lost');
+const stungMs = await H(() => window.__hive.elapsed);
+const lessonText = await page.textContent('#lesson-text');
+assert.equal(await page.isVisible('#puff'), true);
+await page.waitForTimeout(500);
+await shot('13-stung-smoker');
+// reload between the sting and the puff: the stung run comes back to its sheet
+await page.reload();
+await page.waitForFunction(() => window.__hive);
+assert.equal(await page.isVisible('#continue'), true, 'a stung run with a puff left is resumable');
+assert.match(await page.textContent('#continue-note'), /^Stung · \d+:\d\d$/);
+await page.click('#continue');
+assert.equal(await mode(), 'lost');
+assert.equal(await H(() => window.__hive.s.stung), smGuard);
+assert.equal(await page.textContent('#puff'), 'Puff the smoker · +20 s · 1 left');
+assert.equal(await page.textContent('#lesson-text'), lessonText, 'the lesson came back with it');
+assert.ok((await H(() => window.__hive.view.rings.length)) > 0, 'and its rings');
+assert.ok(Math.abs((await H(() => window.__hive.elapsed)) - stungMs) < 50, 'the clock held');
+// puff: the guard is calmed, capped and marked; +20 s; Pure is gone
+await H(() => { window.__hive.view.motion = true; });
+await page.click('#puff');
+await waitMode('play');
+assert.deepEqual(await H((g) => {
+  const h = window.__hive;
+  return [h.s.open[g], h.s.mark[g], h.s.puffs, h.s.stung, h.reads.puffs, h.view.rings.length, h.view.smoke && h.view.smoke.cell];
+}, smGuard), [0, (await H((g) => window.__hive.s.cells[g], smGuard)), 0, -1, 1, 0, smGuard]);
+assert.ok((await H(() => window.__hive.elapsed)) >= stungMs + 20000, '+20 s on the clock');
+assert.match(await railReads(), /assisted$/);
+await page.waitForTimeout(250);
+await shot('14-smoke');
+assert.deepEqual(await H(() => { const r = Arcade.state.get('run'); return [r.s.phase, r.s.puffs, r.reads.puffs, r.lesson]; }),
+  ['play', 0, 1, null], 'the calmed run is saved as a run in play');
+await page.waitForTimeout(1200);
+assert.deepEqual(await H(() => [window.__hive.view.smoke, window.__hive.running]), [null, false], 'the haze clears and the loop rests');
+await clearFrame();
+const smMs = await H(() => window.__hive.elapsed);
+assert.equal(await page.isVisible('#won-pure'), false, 'no seal after smoke');
+assert.match(await page.textContent('#won-reads'), / · 1 puff$/);
+const smRec = await H((id) => Arcade.records.get(`time-${id}`), sm.hive);
+assert.ok(smRec && smRec.value >= 20000 && Math.abs(smRec.value - smMs) < 50, 'a smoked clear sets time-<hive>, penalty included');
+assert.equal(await H((id) => Arcade.records.get(`pure-time-${id}`), sm.hive), null, 'but never pure-time-<hive>');
+assert.equal(await pureCount(), smPure, 'and is not counted Pure');
+assert.equal(await H((d) => Arcade.stats.get('daily')[d].pure, sm.date), false, 'the daily records pure: false');
+await page.waitForTimeout(400);
+await shot('15-won-smoked');
+
+// with the puff spent, a second sting is the end: no smoker, run dropped
+await page.click('#again');
+await waitMode('play');
+await tapCell(await H(() => window.__hive.s.cells.indexOf(1)));
+await waitMode('lost');
+// motion off, the smoke is a still: one held haze, one wake, then rest
+await H(() => { window.__hive.view.motion = false; });
+await page.click('#puff');
+await waitMode('play');
+await page.waitForTimeout(80);
+assert.deepEqual(await H(() => [!!window.__hive.view.smoke, Number.isFinite(window.__hive.view.wakeAt), window.__hive.running]),
+  [true, true, false], 'a still haze, asleep until it ends');
+await shot('14-smoke-still');
+await page.waitForTimeout(700);
+assert.equal(await H(() => window.__hive.view.smoke), null, 'and then it is gone');
+await H(() => { window.__hive.view.motion = true; });
+await tapCell(await H(() => window.__hive.s.cells.findIndex((c, i) => c === 1 && !window.__hive.s.mark[i])));
+await waitMode('lost');
+assert.equal(await page.isVisible('#puff'), false, 'no puffs left: no smoker');
+assert.equal(await page.getAttribute('#retry', 'class'), 'primary');
+assert.equal(await H(() => Arcade.state.get('run')), null, 'and the run is let go');
+await page.click('#lost-menu');
 
 // landscape
 await page.click('#play');

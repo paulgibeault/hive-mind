@@ -129,8 +129,9 @@ function renderHud() {
 
 // ── runs ─────────────────────────────────────────────────────────────────
 function persistRun() {
-  if (s && s.phase === 'play') {
-    Arcade.state.set('run', { s: { ...s, events: [] }, ms: elapsed(), daily, reads });
+  if (s && (s.phase === 'play' || calmable())) {
+    // a stung run kept for the smoker takes its lesson along (#08)
+    Arcade.state.set('run', { s: { ...s, events: [] }, ms: elapsed(), daily, reads, lesson: s.phase === 'lost' ? lesson : null });
   }
 }
 function dropRun() { Arcade.state.set('run', null); }
@@ -246,7 +247,8 @@ function recordWin() {
   $('won-best').textContent = !prev ? 'First clear' : ms < prev.value ? `New best — was ${fmtExact(prev.value)}` : `Best ${fmtExact(prev.value)}`;
   $('won-code').textContent = Core.boardCode(s.hive, s.seed);
   const total = reads.clean + reads.lucky;
-  $('won-reads').textContent = `${reads.clean} of ${total} clean · ${reads.hints} hints · ${reads.puffs} puffs`;
+  const many = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
+  $('won-reads').textContent = `${reads.clean} of ${total} clean · ${many(reads.hints, 'hint')} · ${many(reads.puffs, 'puff')}`;
   $('won-pure').hidden = !pure;
 }
 
@@ -303,6 +305,37 @@ function placeLesson(now) {
   up(Math.max(bottomRoom - k.lo, railBottom - k.hi));
 }
 
+// ── the smoker (#08) ────────────────────────────────────────────────────
+// One second chance, at a cost: a puff calms the guard that stung (core.calm),
+// adds PUFF_MS to the clock and a puff to the run's counters, so the frame
+// isn't Pure any more. A stung run with a puff left is kept, lesson and all,
+// so a reload can still puff; only Same frame / New frame / Menu let it go.
+const PUFF_MS = 20000;
+const calmable = () => !!s && s.phase === 'lost' && s.stung >= 0 && s.puffs > 0;
+
+/** The stung sheet, for a sting just now or a stung run brought back. */
+function showStung() {
+  const kind = s.cells[s.stung];
+  $('lost-note').textContent = daily ? `Daily frame · ${daily}` : Core.hiveById(s.hive).name;
+  $('lost-title').textContent = kind === Core.Q ? "Stung by a queen's guard" : 'Stung';
+  $('lost-left').textContent = `${Core.safeLeft(s)} safe cells were still capped.`;
+  const can = calmable();
+  $('puff').hidden = !can;
+  $('puff').textContent = `Puff the smoker · +${PUFF_MS / 1000} s · ${s.puffs} left`;
+  $('retry').className = can ? 'ghost' : 'primary';    // the smoker is the primary when it's there
+  show('lost');
+}
+
+function puff() {
+  if (mode !== 'lost' || !calmable() || !Core.calm(s)) return;
+  base += PUFF_MS;
+  reads = { ...reads, puffs: reads.puffs + 1 };
+  unteach();                          // the rings go with the sheet
+  show('play');
+  drain(null);
+  persistRun();
+}
+
 // ── core events → everything else ────────────────────────────────────────
 // Every cue hears where the frame is ({ hive, seed, progress }), never what is
 // under a cap. `extra` is only ever what this action has just shown.
@@ -335,12 +368,14 @@ function drain(pre) {
         sfx('sting', cue({ kind: e.kind }));
         if (navigator.vibrate) { try { navigator.vibrate([40, 40, 80]); } catch { /* not allowed */ } }
         runClock(false);
-        dropRun();
-        $('lost-note').textContent = daily ? `Daily frame · ${daily}` : Core.hiveById(s.hive).name;
-        $('lost-title').textContent = e.kind === Core.Q ? "Stung by a queen's guard" : 'Stung';
-        $('lost-left').textContent = `${Core.safeLeft(s)} safe cells were still capped.`;
-        show('lost');
+        if (!calmable()) dropRun();       // with a puff left, act() keeps it (#08)
+        showStung();
         teach(pre ? Reads.lesson(s, pre.move, pre.proven) : null, now);   // #04, from the pre-tap read
+        break;
+      case 'calm':                        // the smoker (#08)
+        R.smoked(e.cell, now);
+        R.marked(e.cell, s.mark[e.cell], now);   // the right pin drops in under the haze
+        sfx('smoke', cue({ kind: e.kind }));
         break;
       case 'won':
         runClock(false);
@@ -465,11 +500,13 @@ async function boot() {
 
   function openMenu() {
     const run = Arcade.state.get('run');
-    const live = run && run.s && run.s.v === Core.SAVE_V && run.s.phase === 'play';
+    const kept = run && run.s && run.s.v === Core.SAVE_V;
+    const stung = kept && run.s.phase === 'lost' && run.s.stung >= 0 && run.s.puffs > 0;   // #08
+    const live = kept && (run.s.phase === 'play' || stung);
     $('continue').hidden = !live;
     if (live) {
       const hive = Core.hiveById(run.s.hive);
-      $('continue-note').textContent = `In the smoker · ${fmt(run.ms || 0)}`;
+      $('continue-note').textContent = `${stung ? 'Stung' : 'In the smoker'} · ${fmt(run.ms || 0)}`;
       $('continue-title').textContent = run.daily ? `Back to the daily ${hive.name}` : `Back to the ${hive.name} frame`;
     }
     paintHive(); renderBest();
@@ -489,6 +526,8 @@ async function boot() {
     // never straight into a live frame; saves from before #03 carry no
     // counters (Reads.restore decides what that means for Pure)
     begin(run.s, { ms: run.ms, daily: run.daily, reads: Reads.restore(run.reads, run.s), paused: true });
+    // a stung run kept for the smoker comes back to its stung sheet (#08)
+    if (calmable()) { showStung(); teach(run.lesson || null, performance.now()); }
   });
   $('code-form').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -506,7 +545,8 @@ async function boot() {
   $('won-menu').addEventListener('click', openMenu);
   $('retry').addEventListener('click', () => startFrame(s.hive, s.seed, { daily }));
   $('lost-new').addEventListener('click', newFrame);
-  $('lost-menu').addEventListener('click', openMenu);
+  $('lost-menu').addEventListener('click', () => { dropRun(); openMenu(); });
+  $('puff').addEventListener('click', puff);
 
   input = bindInput($('view'), {
     active: () => mode === 'play',

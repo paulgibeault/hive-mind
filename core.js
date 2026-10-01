@@ -22,10 +22,11 @@ import { makeRng } from './arcade-rng.js';
 import { neighbours } from './hex.js';
 import { solve, provenNow as provenFrom, minimalProof as proofFrom, SAFE, GUARD, QUEEN } from './solver.js';
 
+// `puffs`: how many times the smoker can calm a sting in one frame (#08).
 export const HIVES = [
-  { id: 'clover',      name: 'Clover Field',  cols: 8, rows: 15, guards: 23, queens: 0,  broken: 0 },
-  { id: 'apple',       name: 'Apple Orchard', cols: 9, rows: 18, guards: 18, queens: 13, broken: 0 },
-  { id: 'wildflowers', name: 'Wildflowers',   cols: 9, rows: 18, guards: 26, queens: 0,  broken: 12 },
+  { id: 'clover',      name: 'Clover Field',  cols: 8, rows: 15, guards: 23, queens: 0,  broken: 0, puffs: 1 },
+  { id: 'apple',       name: 'Apple Orchard', cols: 9, rows: 18, guards: 18, queens: 13, broken: 0, puffs: 1 },
+  { id: 'wildflowers', name: 'Wildflowers',   cols: 9, rows: 18, guards: 26, queens: 0,  broken: 12, puffs: 1 },
 ];
 
 // The hives' ids before 2026-09-28. Saves, records and codes from then still
@@ -47,8 +48,9 @@ export const NONE = 0, MARK_G = 1, MARK_Q = 2;
 export { SAFE, GUARD, QUEEN };
 
 export const MAX_TRIES = 4000;
-// the save format of a game state: 2 since the guards and broken comb
-export const SAVE_V = 2;
+// the save format of a game state: 2 since the guards and broken comb, 3
+// since the smoker (`puffs`, and a stung run that is kept to be calmed)
+export const SAVE_V = 3;
 
 const nbrCache = new Map();
 export function nbrsOf(cols, rows) {
@@ -150,6 +152,7 @@ export function newGame(hiveId, seed) {
     mark: new Array(n).fill(NONE),
     phase: 'play',            // play | won | lost
     stung: -1,                // the cell that stung, when lost
+    puffs: hiveById(hiveId).puffs,   // smoker puffs left (#08)
     moves: 0,
     events: [],
   };
@@ -227,6 +230,25 @@ export function sweep(s, i) {
     if (s.phase !== 'play') break;
     if (!s.open[j]) uncap(s, j);
   }
+  return true;
+}
+
+/**
+ * The smoker (#08): calm the guard that just stung, once per puff. Its cell
+ * goes back under its cap with the right mark in it, and play goes on. Only
+ * the stung cell moves: a sweep that stung stopped there, so the rest of its
+ * targets are still capped, and the wrong mark that caused it stays for the
+ * player to fix. The time it costs is main.js's to add.
+ */
+export function calm(s) {
+  if (s.phase !== 'lost' || !(s.stung >= 0) || !(s.puffs > 0)) return false;
+  const i = s.stung, kind = s.cells[i];
+  s.open[i] = 0;
+  s.mark[i] = kind === Q ? MARK_Q : MARK_G;
+  s.phase = 'play';
+  s.stung = -1;
+  s.puffs--;
+  s.events.push({ type: 'calm', cell: i, kind });
   return true;
 }
 

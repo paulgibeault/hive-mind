@@ -204,3 +204,131 @@ test('a saved game is plain JSON and plays on after a round trip', () => {
   assert.ok(C.reveal(back, i));
   assert.equal(back.open[i], 1);
 });
+
+// ── the smoker (#08) ─────────────────────────────────────────────────────
+
+/* A frame stung on its first guard of `kind`: 'lost', the sting fresh. */
+function stungOn(hive, seed, kind = C.G) {
+  const s = C.newGame(hive, seed);
+  const i = s.cells.indexOf(kind);
+  assert.ok(C.reveal(s, i));
+  assert.equal(s.phase, 'lost');
+  s.events = [];
+  return { s, i };
+}
+
+test('smoker: every hive starts with its puffs, and a new game carries them', () => {
+  for (const h of C.HIVES) {
+    assert.equal(h.puffs, 1, `${h.id} gives one puff`);
+    assert.equal(C.newGame(h.id, 3).puffs, h.puffs);
+  }
+});
+
+test('smoker: calm restores play, puts the right mark in, and costs a puff', () => {
+  const { s, i } = stungOn('clover', 99);
+  const before = { open: [...s.open], mark: [...s.mark], moves: s.moves };
+  assert.equal(C.calm(s), true);
+  assert.equal(s.phase, 'play');
+  assert.equal(s.stung, -1);
+  assert.equal(s.puffs, 0);
+  assert.equal(s.open[i], 0, 'the cell is capped again');
+  assert.equal(s.mark[i], C.MARK_G, 'and marked as a guard');
+  assert.deepEqual(s.events, [{ type: 'calm', cell: i, kind: C.G }]);
+  // nothing else moved
+  assert.deepEqual(s.open.map((o, k) => (k === i ? 0 : o)), before.open.map((o, k) => (k === i ? 0 : o)));
+  assert.deepEqual(s.mark.map((m, k) => (k === i ? 0 : m)), before.mark);
+  assert.equal(s.moves, before.moves);
+  // and play really goes on
+  const next = s.open.findIndex((o, k) => !o && s.cells[k] === C.EMPTY && !s.mark[k]);
+  assert.ok(C.reveal(s, next));
+  assert.equal(C.reveal(s, i), false, 'the calmed cell is protected by its mark');
+});
+
+test("smoker: a queen's guard is marked as a queen's guard", () => {
+  const { s, i } = stungOn('apple', 77, C.Q);
+  assert.ok(C.calm(s));
+  assert.equal(s.mark[i], C.MARK_Q);
+  assert.deepEqual(s.events, [{ type: 'calm', cell: i, kind: C.Q }]);
+  const g = stungOn('apple', 77, C.G);
+  assert.ok(C.calm(g.s));
+  assert.equal(g.s.mark[g.i], C.MARK_G);
+});
+
+test('smoker: calm refuses without puffs, in play, after a win, and without a sting', () => {
+  const { s } = stungOn('clover', 4);
+  s.puffs = 0;
+  const snap = JSON.stringify(s);
+  assert.equal(C.calm(s), false, 'no puffs left');
+  assert.equal(JSON.stringify(s), snap, 'and nothing moved');
+
+  const play = C.newGame('clover', 4);
+  assert.equal(C.calm(play), false, 'phase play');
+  assert.equal(play.puffs, 1, 'no puff spent');
+
+  const one = stungOn('wildflowers', 6);
+  assert.ok(C.calm(one.s));
+  assert.equal(C.calm(one.s), false, 'calming twice is not a thing');
+  // a second sting with the one puff spent stays a loss
+  const g2 = one.s.cells.findIndex((c, k) => c === C.G && !one.s.mark[k]);
+  assert.ok(C.reveal(one.s, g2));
+  assert.equal(C.calm(one.s), false);
+  assert.equal(one.s.phase, 'lost');
+
+  const odd = stungOn('clover', 5);
+  odd.s.stung = -1;
+  assert.equal(C.calm(odd.s), false, 'lost without a stung cell');
+
+  const won = C.newGame('clover', 321);
+  for (let k = 0; k < won.cells.length && won.phase === 'play'; k++) if (!won.open[k] && won.cells[k] === C.EMPTY) C.reveal(won, k);
+  assert.equal(won.phase, 'won');
+  assert.equal(C.calm(won), false, 'phase won');
+});
+
+test('smoker: a sweep-sting calmed leaves the other targets capped and the wrong mark in place', () => {
+  // a 1 with one guard and 2+ capped safe neighbours; mark a safe one in the
+  // guard's place, so the sweep stings partway round
+  let found = null;
+  for (let seed = 1; seed < 200 && !found; seed++) {
+    const s = C.newGame('clover', seed);
+    const nb = C.nbrsOf(s.cols, s.rows);
+    for (let c = 0; c < s.cells.length && !found; c++) {
+      if (!s.open[c] || s.shown[c] !== 1) continue;
+      const hid = nb[c].filter((j) => !s.open[j]);
+      const safe = hid.filter((j) => s.cells[j] === C.EMPTY);
+      if (hid.length - safe.length !== 1 || safe.length < 2) continue;
+      const t = structuredClone({ ...s, events: [] });
+      C.setMark(t, safe[0], C.MARK_G);
+      assert.ok(C.sweep(t, c));
+      if (t.phase !== 'lost') continue;
+      const left = nb[c].filter((j) => !t.open[j] && t.cells[j] === C.EMPTY && !t.mark[j]);
+      if (left.length) found = { t, wrong: safe[0], left };
+    }
+  }
+  assert.ok(found, 'a sweep that stung before reaching all of its targets');
+  const { t, wrong, left } = found;
+  const stung = t.stung;
+  t.events = [];
+  assert.ok(C.calm(t));
+  assert.equal(t.phase, 'play');
+  assert.equal(t.open[stung], 0);
+  assert.equal(t.mark[stung], C.MARK_G);
+  for (const j of left) assert.equal(t.open[j], 0, `target ${j} is still capped`);
+  assert.equal(t.mark[wrong], C.MARK_G, 'the wrong mark stays for the player to fix');
+  assert.equal(t.open[wrong], 0);
+});
+
+test('smoker: a frame calmed and played out still wins, and survives a save in between', () => {
+  for (const h of C.HIVES) {
+    const { s } = stungOn(h.id, 41, h.queens ? C.Q : C.G);
+    // the stung state is plain JSON: saved between the sting and the puff
+    const back = JSON.parse(JSON.stringify({ ...s, events: [] }));
+    assert.equal(back.phase, 'lost');
+    assert.ok(C.calm(back));
+    for (let k = 0; k < back.cells.length && back.phase === 'play'; k++) {
+      if (!back.open[k] && back.cells[k] === C.EMPTY) C.reveal(back, k);
+    }
+    assert.equal(back.phase, 'won', h.id);
+    assert.equal(back.events.at(-1).type, 'won');
+    assert.equal(back.puffs, 0);
+  }
+});
