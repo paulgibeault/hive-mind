@@ -151,3 +151,26 @@ test('easing stays in range', () => {
   }
   assert.equal(J.clamp01(-1), 0); assert.equal(J.clamp01(2), 1);
 });
+
+// ── Scouts (#12) ────────────────────────────────────────────────────────────
+
+test('Scouts: a Scout shows its number (0 too), dims only when its whole range is settled, and is never "refused"', () => {
+  const s = C.newGame('sunflower', 7);
+  const nbrs = C.nbrsOf(s.cols, s.rows), range = C.ring2Of(s.cols, s.rows);
+  const sc = s.scout.findIndex((v, i) => v && !s.open[i]);
+  C.reveal(s, sc);
+  assert.ok(J.showsNumber(s, sc));
+  assert.ok(J.showsNumber({ ...s, shown: s.shown.map(() => 0) }, sc), 'a Scout 0 still shows');
+  // settle every neighbour: a plain number would be finished, a Scout isn't
+  for (const j of nbrs[sc]) if (!s.open[j]) s.mark[j] = C.MARK_G;
+  const outer = range[sc].filter((j) => !nbrs[sc].includes(j) && !s.open[j]);
+  assert.ok(outer.length > 0);
+  assert.equal(J.finished(s, nbrs, sc), false, 'its outer ring is still capped');
+  assert.equal(J.refused(s, nbrs, sc), false, 'a Scout is never swept, so its tap is idle, not refused');
+  for (const j of outer) s.mark[j] = C.MARK_G;
+  assert.equal(J.finished(s, nbrs, sc), true, 'its whole range settled: it dims');
+  // no tells: what the range hides never changes the answer
+  const x = structuredClone(s);
+  for (const j of range[sc]) if (!x.open[j]) x.cells[j] = x.cells[j] ? C.EMPTY : C.G;
+  assert.equal(J.finished(x, nbrs, sc), true);
+});

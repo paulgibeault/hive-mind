@@ -22,14 +22,18 @@
  * brief outline, the hold ring's delay) sets view.wakeAt, and main.js wakes
  * the resting loop once for it.
  *
+ * A Scout (#12), once uncapped, wears a double rim round a lighter-weight
+ * number: it counts two steps out, so it should read as a different kind of
+ * number at a glance, not just a different value.
+ *
  * No tells: a capped cell is drawn from the cap sprite and the player's mark
- * alone, never from what it hides — broken comb included. A ripple covers
+ * alone, never from what it hides — broken comb and Scouts included. A ripple covers
  * only the cells its uncap opened; a dimmed number reads only open cells and
  * marks (juice.js).
  */
 
 import { centre, extent, cellAt as hexAt } from './hex.js';
-import { EMPTY, Q, MARK_Q, nbrsOf } from './core.js';
+import { EMPTY, Q, MARK_Q, nbrsOf, isScout } from './core.js';
 import {
   RING_MS, SWEEP_MS, POUR_ROW_MS, rings, clockwise, showsNumber, finished,
   clamp01, easeOut, easeIn, pinScale, shake,
@@ -423,6 +427,21 @@ export function createRenderer(canvas) {
     ctx.stroke();
   }
 
+  /* A Scout's double rim (#12): two thin honey hexes inside the comb's own
+   * edge, the outer one brighter. Drawn only on an uncapped Scout. */
+  function scoutRim(x, y, r, honey) {
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(1.2, r * 0.065);
+    ctx.strokeStyle = honey ? 'rgba(42,29,16,0.75)' : C.capHi;
+    hexPath(ctx, x, y, r * 0.8);
+    ctx.stroke();
+    ctx.strokeStyle = honey ? 'rgba(42,29,16,0.55)' : 'rgba(242,179,61,0.7)';
+    hexPath(ctx, x, y, r * 0.64);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   /* ink: 'dim' for a finished number (35%), 'honey' for dark ink on the
    * win's honey, or nothing for the plain reading */
   function reading(s, i, x, y, r, ink) {
@@ -437,7 +456,15 @@ export function createRenderer(canvas) {
     }
     const honey = ink === 'honey';
     if (ink === 'dim') ctx.globalAlpha = 0.35;
-    if (s.queens > 0) {
+    if (isScout(s, i)) {
+      // a Scout: the double rim, and its number (0 too) in a lighter weight,
+      // a little smaller so it sits inside the inner rim
+      scoutRim(x, y, r, honey);
+      ctx.font = `500 ${Math.round(r * 0.74)}px ${FONT}`;
+      ctx.fillStyle = honey ? C.dark : C.ink;
+      ctx.fillText(String(w), x, y + r * 0.04);
+    } else if (s.queens > 0) {
+
       const both = w > 0 && h > 0;
       const size = both ? Math.round(r * 0.72) : big;
       ctx.font = `800 ${size}px ${FONT}`;

@@ -93,10 +93,10 @@ assert.deepEqual(await H(() => Arcade.stats.get('pantry') || {}), {});
 assert.equal(await page.textContent('#pantry-sum'), 'empty');
 await shot('1-menu');
 
-// menu: three hives, Clover Field first; the daily is on offer
+// menu: four hives (#12), Clover Field first; the daily is on offer
 assert.deepEqual(await page.$$eval('#hive button', (b) => b.map((x) => x.childNodes[1].textContent)),
-  ['Clover Field', 'Apple Orchard', 'Wildflowers']);
-assert.match(await page.textContent('#daily-title'), /^Today: (Clover Field|Apple Orchard|Wildflowers)$/);
+  ['Clover Field', 'Apple Orchard', 'Wildflowers', 'Sunflower Field']);
+assert.match(await page.textContent('#daily-title'), /^Today: (Clover Field|Apple Orchard|Wildflowers|Sunflower Field)$/);
 
 // a frame code opens exactly that frame — an old OR- code too, as Apple Orchard
 await page.click('#code-box summary');
@@ -707,8 +707,8 @@ await waitMode('pantry');
 assert.equal(await page.evaluate(() => document.activeElement.id), 'pantry-back', 'focus lands in the sheet');
 // a shelf per hive, and the Queen's Frame waiting with an empty slot
 assert.deepEqual(await page.$$eval('.shelf-head h3', (h) => h.map((x) => x.textContent)),
-  ['Clover Field', 'Apple Orchard', 'Wildflowers', "Queen's Frame"]);
-assert.equal(await page.$$eval('.shelf-box:nth-child(4) .slot-empty', (e) => e.length), 1);
+  ['Clover Field', 'Apple Orchard', 'Wildflowers', 'Sunflower Field', "Queen's Frame"]);
+for (const k of [4, 5]) assert.equal(await page.$$eval(`.shelf-box:nth-child(${k}) .slot-empty`, (e) => e.length), 1, 'Sunflower Field and the Queen\'s Frame: empty yet');
 for (const k of [1, 2, 3]) assert.ok(await page.$$eval(`.shelf-box:nth-child(${k}) button.jar`, (j) => j.length) >= 1);
 // jars are buttons with their own words
 const labels = await page.$$eval('button.jar', (j) => j.map((b) => b.getAttribute('aria-label')));
@@ -759,7 +759,7 @@ await waitMode('menu');
 // ── the Queen's Frame (#10): open it from its strip, clear it, a royal jar ──
 await H(() => { window.__hive.view.motion = true; });
 await page.waitForTimeout(2500);                   // the Send toast goes, for the shots
-assert.equal(await page.$$eval('#hive button', (b) => b.length), 3, 'the hive selector never offers it');
+assert.deepEqual(await page.$$eval('#hive button', (b) => b.map((x) => x.childNodes[1].textContent)), ['Clover Field', 'Apple Orchard', 'Wildflowers', 'Sunflower Field'], 'the hive selector never offers it');
 const wk = await H(() => window.__hive.thisWeek());
 assert.match(wk.week, /^\d{4}-W\d\d$/);
 assert.equal(await H(() => window.__hive.today().hive === 'queen'), false, 'nor does the daily');
@@ -822,10 +822,10 @@ await shot('19-queen-strip-cleared');
 // the pantry: the Queen's Frame shelf has its jar, and the empty slot is gone
 await page.click('#pantry-open');
 await waitMode('pantry');
-assert.equal(await page.$$eval('.shelf-box:nth-child(4) .slot-empty', (e) => e.length), 0);
-assert.deepEqual(await page.$$eval('.shelf-box:nth-child(4) button.jar', (j) => j.map((b) => b.getAttribute('aria-label').split(',')[0])), ["Queen's Frame"]);
+assert.equal(await page.$$eval('.shelf-box:nth-child(5) .slot-empty', (e) => e.length), 0);
+assert.deepEqual(await page.$$eval('.shelf-box:nth-child(5) button.jar', (j) => j.map((b) => b.getAttribute('aria-label').split(',')[0])), ["Queen's Frame"]);
 assert.match(await page.textContent('#detail-note'), /^Queen's Frame · /, 'the newest jar is picked');
-await page.evaluate(() => { document.querySelector('.shelf-box:nth-child(4)').scrollIntoView(); });
+await page.evaluate(() => { document.querySelector('.shelf-box:nth-child(5)').scrollIntoView(); });
 await page.waitForTimeout(200);
 await shot('20-pantry-royal');
 await page.keyboard.press('Escape');
@@ -959,8 +959,120 @@ await waitMode('play');
 assert.equal(await barShown(), true, 'cleared once, its ghost races');
 await page.click('#pause'); await page.click('#quit');
 
+// ── Sunflower Field (#12): Scouts — pick it, uncap Scouts, no sweep, clear it, its jar ──
+await H(() => { window.__hive.view.motion = true; });
+// four hive buttons fit at 390 px: inside the viewport, no name clipped or
+// wrapped, each a comfortable target
+const seg = await page.$$eval('#hive button', (bs) => bs.map((b) => {
+  const r = b.getBoundingClientRect(), name = b.childNodes[1];
+  const range = document.createRange(); range.selectNodeContents(name);
+  return { left: r.left, right: r.right, h: r.height, over: b.scrollWidth > b.clientWidth, lines: range.getClientRects().length };
+}));
+assert.equal(seg.length, 4);
+for (const b of seg) {
+  assert.ok(b.left >= 0 && b.right <= 390, `a hive button runs off the screen: ${JSON.stringify(b)}`);
+  assert.ok(!b.over && b.lines === 1, `a hive name is clipped or wrapped: ${JSON.stringify(b)}`);
+  assert.ok(b.h >= 44, `a hive button is ${b.h} px tall`);
+}
+assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll');
+// the taller grid makes the menu scroll: its rows stack, none squashed into the next
+assert.deepEqual(await page.$$eval('#menu > :not([hidden])', (els) => els.flatMap((e, k) => {
+  const a = e.getBoundingClientRect(), b = els[k + 1] && els[k + 1].getBoundingClientRect();
+  return [...(e.scrollHeight > e.clientHeight + 1 ? [`${e.id || e.className} squashed`] : []),
+    ...(b && b.top < a.bottom - 1 ? [`${e.id || e.className} overlaps the next row`] : [])];
+})), []);
+await page.click('#hive button:nth-child(4)');
+assert.equal(await page.getAttribute('#hive button:nth-child(4)', 'aria-checked'), 'true');
+assert.match(await page.textContent('#hive-note'), /^Scouts/);
+assert.equal(await H(() => Arcade.state.get('prefs').hive), 3, 'prefs.hive: its index among the pickable hives');
+await page.$eval('#hive', (e) => e.scrollIntoView({ block: 'center' }));
+await page.waitForTimeout(150);
+await shot('21-menu-four-hives');
+await page.click('#play');
+await waitMode('play');
+assert.deepEqual(await H(() => { const s = window.__hive.s; return [s.hive, s.cols, s.rows, s.queens, s.scout.filter(Boolean).length]; }),
+  ['sunflower', 9, 18, 0, 8]);
+assert.equal(await page.textContent('#hud-hive'), 'Sunflower Field');
+// play like the solver, uncapping Scouts as soon as they are proven safe,
+// until two are open
+const openScouts = () => H(() => { const s = window.__hive.s; return s.scout.flatMap((v, i) => (v && s.open[i] ? [i] : [])); });
+for (let k = 0; k < 200 && (await openScouts()).length < 2; k++) {
+  const proven = await provenSafe();
+  assert.ok(proven.length, 'something is always provable');
+  const sc = await H((p) => p.find((i) => window.__hive.s.scout[i]), proven);
+  await tapCell(sc ?? proven[0]);
+}
+const [scout] = await openScouts();
+assert.ok(scout !== undefined, 'a Scout was uncapped');
+await page.waitForTimeout(500);
+// its double rim: the inner rim lights the comb where a plain open cell is
+// dark wax (sampled on the canvas, right of centre, clear of the number)
+const rimsAt = (cells) => H((ks) => {
+  const h = window.__hive, r = h.layout.r, d = h.layout.dpr, view = document.getElementById('view');
+  const img = view.getContext('2d').getImageData(0, 0, view.width, view.height);   // one readback
+  return ks.map((k) => {
+    const c = h.at(k);
+    let best = 0;
+    for (const f of [0.6, 0.62, 0.64, 0.66, 0.68]) {
+      const x = Math.round((c.x + f * r * Math.cos(Math.PI / 6)) * d), y = Math.round(c.y * d), o = 4 * (y * view.width + x);
+      best = Math.max(best, 0.2126 * img.data[o] + 0.7152 * img.data[o + 1] + 0.0722 * img.data[o + 2]);
+    }
+    return best;
+  });
+}, cells);
+const plainOpen = await H(() => {
+  const s = window.__hive.s;
+  return s.open.findIndex((o, i) => o && !s.scout[i] && s.cells[i] === 0 && s.shown[i] === 0);
+});
+const [rimLit, rimDark] = await rimsAt([scout, plainOpen]);
+assert.ok(rimLit > 120 && rimDark < 90, `the Scout's rim lights its comb: ${rimLit.toFixed(0)} vs plain ${rimDark.toFixed(0)}`);
+// a sweep on it is refused, even with every guard in its range marked:
+// nothing opens, no move counts, and it doesn't shake (its tap is idle)
+const range = await H((i) => window.__hive.Core.ring2Of(9, 18)[i], scout);
+for (const j of await H((r) => r.filter((k) => window.__hive.s.cells[k] !== 0 && !window.__hive.s.mark[k]), range)) await holdCell(j);
+const before = await H(() => ({ open: window.__hive.s.open.join(''), moves: window.__hive.s.moves }));
+await tapCell(scout);
+await page.waitForTimeout(100);
+assert.deepEqual(await H(() => ({ open: window.__hive.s.open.join(''), moves: window.__hive.s.moves })), before, 'a Scout is never swept');
+assert.equal(await H(() => window.__hive.view.refusal), null, 'and its tap is idle, not a refusal');
+assert.equal(await mode(), 'play');
+await page.waitForTimeout(300);
+await shot('22-sunflower-play');
+await solverClear();
+assert.equal(await page.isVisible('#won-pure'), true, 'a solver-driven clear is Pure');
+assert.match(await page.textContent('#won-note'), /^Pure · jar \d+ · sunflower honey$/);
+const sunSeed = await H(() => window.__hive.s.seed);
+assert.deepEqual(await H(() => [...document.querySelectorAll('#won-jar .jar')].map((j) => j.style.getPropertyValue('--top'))),
+  [await H((x) => window.__hive.honeyColour('sunflower', x).top, sunSeed)]);
+const sRec = await H(() => [Arcade.records.get('time-sunflower'), Arcade.records.get('pure-time-sunflower')]);
+assert.ok(sRec[0] && sRec[0].value > 0 && sRec[0].label === 'Sunflower Field — fastest frame', 'time-sunflower');
+assert.ok(sRec[1] && sRec[1].value === sRec[0].value, 'pure-time-sunflower');
+await page.waitForTimeout(1300);
+await shot('23-sunflower-won');
+await page.click('#won-menu');
+// its pantry shelf has the jar
+await page.click('#pantry-open');
+await waitMode('pantry');
+assert.equal(await page.$$eval('.shelf-box:nth-child(4) .slot-empty', (e) => e.length), 0);
+assert.deepEqual(await page.$$eval('.shelf-box:nth-child(4) button.jar', (j) => j.map((b) => b.getAttribute('aria-label').split(',')[0])), ['Sunflower Field']);
+assert.match(await page.textContent('#shelf-sunflower'), /Sunflower Field/);
+assert.match(await page.textContent('#detail-note'), /^Sunflower Field · /, 'the newest jar is picked');
+await page.evaluate(() => { document.querySelector('.shelf-box:nth-child(4)').scrollIntoView(); });
+await page.waitForTimeout(200);
+await shot('24-pantry-sunflower');
+await page.keyboard.press('Escape');
+await waitMode('menu');
+// an SU- code plays it
+await H(() => { document.getElementById('code-box').open = true; });
+await page.fill('#code-in', 'su-0000abc');
+await page.press('#code-in', 'Enter');
+await waitMode('play');
+assert.deepEqual(await H(() => [window.__hive.s.hive, window.__hive.s.seed]), ['sunflower', parseInt('abc', 36)]);
+await page.click('#pause'); await page.click('#quit');
+
 // landscape
 await page.click('#play');
+
 await page.setViewportSize({ width: 1280, height: 720 });
 await page.waitForTimeout(300);
 await shot('8-landscape');

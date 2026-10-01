@@ -17,6 +17,14 @@
  *                main.js opens it from its own strip, on the week's seed
  *                (week.js), and its QU- codes play anywhere.
  *
+ * and a fourth idea (#12):
+ *   sunflower    Sunflower Field: one kind, but some comb is a SCOUT. A Scout
+ *                counts the guards up to two steps away (its RANGE, up to 18
+ *                cells), not just its six neighbours. Capped, it looks like
+ *                any cap; uncapped, it has a double rim. It never floods, and
+ *                it can't be swept. Scouts go only in one-kind hives: their
+ *                reading is one number.
+ *
  * Every frame is fixed by (hive, seed) and ships with its OPENING already
  * uncapped. The generator keeps only frames the solver (solver.js) can
  * finish from that opening by logic alone — there is never a forced guess —
@@ -25,19 +33,24 @@
  */
 
 import { makeRng } from './arcade-rng.js';
-import { neighbours } from './hex.js';
+import { neighbours, ring2 } from './hex.js';
 import { solve, provenNow as provenFrom, minimalProof as proofFrom, SAFE, GUARD, QUEEN } from './solver.js';
 
 // `puffs`: how many times the smoker can calm a sting in one frame (#08).
 // `hidden`: not offered by the hive selector or the daily rotation (#10);
 // it still generates, plays, records and parses like any other hive. Hives
 // are only ever appended: the hive id is not in the RNG, so a new one never
-// moves another hive's frames.
+// moves another hive's frames, and prefs.hive (an index into PICKABLE) keeps
+// pointing at the same hive.
+// `scouts`: how many safe cells are Scouts (#12). Only in one-kind hives.
+// `dailyFrom`: the first date ('YYYY-MM-DD', local) the daily rotation may
+// deal this hive; see dailyHive().
 export const HIVES = [
   { id: 'clover',      name: 'Clover Field',  cols: 8, rows: 15, guards: 23, queens: 0,  broken: 0, puffs: 1 },
   { id: 'apple',       name: 'Apple Orchard', cols: 9, rows: 18, guards: 18, queens: 13, broken: 0, puffs: 1 },
   { id: 'wildflowers', name: 'Wildflowers',   cols: 9, rows: 18, guards: 26, queens: 0,  broken: 12, puffs: 1 },
   { id: 'queen',       name: "Queen's Frame", cols: 9, rows: 20, guards: 21, queens: 12, broken: 10, puffs: 2, hidden: true },
+  { id: 'sunflower',   name: 'Sunflower Field', cols: 9, rows: 18, guards: 32, queens: 0, broken: 0, scouts: 8, puffs: 1, dailyFrom: '2026-11-01' },
 ];
 
 // The hives' ids before 2026-09-28. Saves, records and codes from then still
@@ -48,6 +61,25 @@ export const hiveById = (id) => HIVES.find((h) => h.id === current(id)) || HIVES
 /** The hives a player picks from (the selector, the daily): every one not hidden. */
 export const PICKABLE = HIVES.filter((h) => !h.hidden);
 
+const dayOf = (date) => Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000);
+
+/**
+ * The Daily Frame's hive for a local date 'YYYY-MM-DD'. Every pickable hive
+ * whose `dailyFrom` has come takes its turn, one a day. Until a new hive's
+ * first day the rotation is exactly the old one (day number mod the hives
+ * then dealt), so no past daily — and not today's, mid-day after a deploy —
+ * changes hive. From its first day the newest hive leads, then the others in
+ * selector order.
+ */
+export function dailyHive(date) {
+  const pool = PICKABLE.filter((h) => !h.dailyFrom || date >= h.dailyFrom);
+  const n = pool.length, day = dayOf(date);
+  const newest = pool.reduce((a, h) => (h.dailyFrom && (!a || h.dailyFrom > a.dailyFrom) ? h : a), null);
+  if (!newest) return pool[((day % n) + n) % n].id;
+  const k = day - dayOf(newest.dailyFrom);
+  return pool[(pool.indexOf(newest) + (k % n)) % n].id;
+}
+
 // Sizes fill a portrait phone (the frame is width-bound at 8–9 cells across).
 // Densities (~19%) are first guesses, set so a fair frame still turns up in a
 // handful of tries (a millisecond or two); tune them by playtest.
@@ -57,6 +89,13 @@ export const PICKABLE = HIVES.filter((h) => !h.hidden);
 // 22 + 12 needed a median of 11 tries and up to 107, 21 + 12 a median of 8
 // and up to 89 — the extra hardness wasn't worth twice the worst case on a
 // phone.
+// Sunflower Field (#12) runs 32 guards (19.8%) with 8 Scouts, measured over
+// seeds 1–1000: median 5 tries, p90 13, max 40, under 1 ms a frame (median).
+// 30 + 6 was easier (median 3, max 20) and 34 + 6 harder (median 8, max 68);
+// 8 Scouts cost no more tries than 6 at 32 guards, and about 4 in 5 frames
+// then need a Scout (read as blank comb instead, the frame isn't solvable),
+// against 7 in 10 with 6. provenNow's p95 on mid-game Sunflower frames stays
+// within #2's budget (tools/bench-proof.mjs), so Scouts aren't capped lower.
 
 // a cell's contents
 export const EMPTY = 0, G = 1, Q = 2;
@@ -78,21 +117,40 @@ export function nbrsOf(cols, rows) {
   return nbrCache.get(k);
 }
 
-/** What cell i reads, from the contents alone. */
-function count(nbrs, cells, i) {
+/** Every cell's range — the cells within two steps — cached like nbrsOf (#12). */
+const ringCache = new Map();
+export function ring2Of(cols, rows) {
+  const k = `${cols}x${rows}`;
+  if (!ringCache.has(k)) ringCache.set(k, ring2(cols, rows));
+  return ringCache.get(k);
+}
+
+/** Is cell i a Scout? (Saves from before #12 carry no `scout`: none are.) */
+export const isScout = (f, i) => !!(f.scout && f.scout[i]);
+
+/** The cells cell i's number counts: its range for a Scout, else its neighbours. */
+export const rangeOf = (f, i) => (isScout(f, i) ? ring2Of(f.cols, f.rows) : nbrsOf(f.cols, f.rows))[i];
+
+/** What cell i reads over the cells `over`, from the contents alone. */
+function count(over, cells, i) {
   let g = 0, q = 0;
-  for (const j of nbrs[i]) { if (cells[j] === G) g++; else if (cells[j] === Q) q++; }
+  for (const j of over[i]) { if (cells[j] === G) g++; else if (cells[j] === Q) q++; }
   return { g, q };
 }
 
-/** The clue a revealed cell shows: { guards, queens }, or null for broken comb. */
+/**
+ * The clue a revealed cell shows: { guards, queens }, or null for broken
+ * comb. A Scout's carries its range as `over` (solver.js reads it as the
+ * cells the number counts).
+ */
 export function clueOf(f, i) {
   if (f.broken[i]) return null;
+  if (isScout(f, i)) return { guards: f.shown[i], queens: f.shownH[i], over: ring2Of(f.cols, f.rows)[i] };
   return { guards: f.shown[i], queens: f.shownH[i] };
 }
 
-/** Does uncapping this cell open its neighbours too? (A plain zero.) */
-export const floods = (f, i) => !f.broken[i] && f.shown[i] === 0 && f.shownH[i] === 0;
+/** Does uncapping this cell open its neighbours too? (A plain zero; never a Scout.) */
+export const floods = (f, i) => !f.broken[i] && !isScout(f, i) && f.shown[i] === 0 && f.shownH[i] === 0;
 
 /** Uncap i and flood from it; returns every index newly opened. */
 function flood(f, nbrs, open, i) {
@@ -145,7 +203,20 @@ function candidate(hive, rng) {
     const safe = rng.shuffle([...Array(n).keys()].filter((i) => cells[i] === EMPTY && !clear.has(i)));
     for (const i of safe.slice(0, hive.broken)) broken[i] = 1;
   }
-  return { cols, rows, guards: hive.guards, queens: hive.queens, cells, shown, shownH, broken, start };
+  // Scouts (#12) go on safe cells outside the opening, drawn after everything
+  // else so a hive without them draws exactly what it always did. A Scout's
+  // stored count is over its range.
+  const scout = new Array(n).fill(0);
+  if (hive.scouts) {
+    const range = ring2Of(cols, rows);
+    const safe = rng.shuffle([...Array(n).keys()].filter((i) => cells[i] === EMPTY && !broken[i] && !clear.has(i)));
+    for (const i of safe.slice(0, hive.scouts)) {
+      scout[i] = 1;
+      const c = count(range, cells, i);
+      shown[i] = c.g; shownH[i] = c.q;
+    }
+  }
+  return { cols, rows, guards: hive.guards, queens: hive.queens, cells, shown, shownH, broken, scout, start };
 }
 
 /** The frame for (hive, seed). Deterministic: same seed, same frame, anywhere. */
@@ -227,11 +298,13 @@ export function setMark(s, i, m) {
 
 /**
  * Sweep around an uncapped plain number whose marks already account for it:
- * every unmarked hidden neighbour is uncapped. Broken comb can't be swept.
+ * every unmarked hidden neighbour is uncapped. Broken comb can't be swept,
+ * and nor can a Scout (#12): its number is about its whole range, and a
+ * sweep is a neighbour gesture.
  * Marks are the player's word — a wrong mark here stings, as in the classic.
  */
 export function sweep(s, i) {
-  if (s.phase !== 'play' || !s.open[i] || s.cells[i] !== EMPTY || s.broken[i]) return false;
+  if (s.phase !== 'play' || !s.open[i] || s.cells[i] !== EMPTY || s.broken[i] || isScout(s, i)) return false;
   const nbrs = nbrsOf(s.cols, s.rows);
   let mg = 0, mq = 0;
   for (const j of nbrs[i]) {

@@ -16,7 +16,7 @@
  * shown anyway.
  */
 
-import { nbrsOf, minimalProof, EMPTY, NONE, QUEEN } from './core.js';
+import { nbrsOf, minimalProof, isScout, EMPTY, NONE, QUEEN } from './core.js';
 
 // ── the run's counters ──────────────────────────────────────────────────
 
@@ -58,7 +58,7 @@ export const railLine = (r) => `${r.clean} clean · ${isPure(r) ? 'pure' : 'assi
 export function moveAt(s, i) {
   if (s.phase !== 'play' || i < 0 || i >= s.open.length) return null;
   if (!s.open[i]) return s.mark[i] === NONE ? { type: 'reveal', cell: i, targets: [i] } : null;
-  if (s.cells[i] !== EMPTY || s.broken[i]) return null;
+  if (s.cells[i] !== EMPTY || s.broken[i] || isScout(s, i)) return null;   // broken comb and Scouts are never swept
   const targets = nbrsOf(s.cols, s.rows)[i].filter((j) => !s.open[j] && s.mark[j] === NONE);
   return targets.length ? { type: 'sweep', cell: i, targets } : null;
 }
@@ -136,7 +136,7 @@ const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];
  * SAFE, so it never explains a sting.
  */
 export function sentence(s, c, cell, value) {
-  if (s.broken[c]) return null;
+  if (s.broken[c] || isScout(s, c)) return null;   // a Scout's proof gets the generic line (#12)
   const nb = nbrsOf(s.cols, s.rows)[c];
   const capped = nb.filter((j) => j === cell || !s.open[j]).length;
   const g = s.shown[c], q = s.queens > 0 ? s.shownH[c] : 0;

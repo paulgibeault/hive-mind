@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as C from '../core.js';
-import { neighbours, centre, cellAt } from '../hex.js';
+import { neighbours, ring2, centre, cellAt } from '../hex.js';
 import { makeRng } from '../arcade-rng.js';
 
 test('arcade-rng is the fleet algorithm (known-answer vector, GAME_INTEGRATION §7c)', () => {
@@ -56,9 +56,26 @@ test('every hive: the right counts, a clear flooding opening, honest readings', 
       assert.equal(f.cells[f.start], C.EMPTY);
       for (const j of nb[f.start]) assert.equal(f.cells[j], C.EMPTY);
       assert.ok(C.floods(f, f.start));
-      let broken = 0;
+      let broken = 0, scouts = 0;
+      const range = C.ring2Of(f.cols, f.rows);
       for (let i = 0; i < f.cells.length; i++) {
-        if (f.cells[i] !== C.EMPTY) { assert.equal(f.broken[i], 0, 'only safe comb breaks'); continue; }
+        if (f.cells[i] !== C.EMPTY) {
+          assert.equal(f.broken[i], 0, 'only safe comb breaks');
+          assert.equal(f.scout[i], 0, 'only safe comb scouts');
+          continue;
+        }
+        if (f.scout[i]) {
+          // a Scout (#12): its count is over its range, and it never floods
+          scouts++;
+          assert.equal(f.broken[i], 0, 'a Scout is never broken too');
+          assert.ok(i !== f.start && !nb[f.start].includes(i), 'the opening has no Scout');
+          const g = range[i].filter((j) => f.cells[j] === C.G).length;
+          assert.equal(f.shown[i], g, "a Scout's stored count is its range's");
+          assert.equal(f.shownH[i], 0);
+          assert.deepEqual(C.clueOf(f, i), { guards: g, queens: 0, over: range[i] });
+          assert.equal(C.floods(f, i), false, 'a Scout never floods, not even a 0');
+          continue;
+        }
         const g = nb[i].filter((j) => f.cells[j] === C.G).length;
         const q = nb[i].filter((j) => f.cells[j] === C.Q).length;
         assert.equal(f.shown[i], g, 'the stored count is the truth, broken or not');
@@ -73,6 +90,7 @@ test('every hive: the right counts, a clear flooding opening, honest readings', 
         }
       }
       assert.equal(broken, h.broken);
+      assert.equal(scouts, h.scouts || 0);
     }
   }
 });
@@ -198,9 +216,12 @@ test("the Queen's Frame: Apple Orchard's two kinds on broken comb, 9 × 20, hidd
   assert.ok(q.guards > 0 && q.queens > 0 && q.broken > 0, 'both kinds, and broken comb');
   assert.equal(q.puffs, 2);
   assert.equal(q.hidden, true);
-  assert.deepEqual(C.PICKABLE.map((h) => h.id), ['clover', 'apple', 'wildflowers'], 'the selector and the daily never offer it');
+  assert.ok(!C.PICKABLE.includes(q), 'the selector and the daily never offer it');
   assert.deepEqual(C.HIVES.filter((h) => h.hidden).map((h) => h.id), ['queen']);
-  assert.equal(C.HIVES.at(-1).id, 'queen', 'appended: the pickable hives keep their indices (prefs.hive)');
+  // appended after the three pickable hives, so they kept their indices
+  // (prefs.hive); Sunflower Field (#12) was appended after it in turn
+  assert.deepEqual(C.HIVES.map((h) => h.id).slice(0, 4), ['clover', 'apple', 'wildflowers', 'queen']);
+
   const f = C.generate('queen', 9);
   assert.ok(f.cells.includes(C.Q) && f.broken.some(Boolean));
 });
@@ -395,4 +416,146 @@ test('smoker: a frame calmed and played out still wins, and survives a save in b
     assert.equal(back.events.at(-1).type, 'won');
     assert.equal(back.puffs, h.puffs - 1);
   }
+});
+
+// ── Sunflower Field: Scouts (#12) ───────────────────────────────────────
+
+test('ring2: a cell\'s range is every cell one or two steps away, up to 18', () => {
+  for (const [cols, rows] of [[9, 18], [5, 5], [3, 4]]) {
+    const nb = neighbours(cols, rows), range = ring2(cols, rows);
+    // two steps by breadth-first search, independently
+    for (let i = 0; i < cols * rows; i++) {
+      const want = new Set(nb[i]);
+      for (const j of nb[i]) for (const k of nb[j]) want.add(k);
+      want.delete(i);
+      assert.deepEqual(range[i], [...want].sort((a, b) => a - b), `${cols}×${rows} cell ${i}`);
+      for (const j of range[i]) assert.ok(range[j].includes(i), 'symmetric');
+    }
+  }
+  const range = ring2(9, 18);
+  const x = 4, y = 8;                                       // an interior cell
+  assert.equal(range[y * 9 + x].length, 18);
+  assert.equal(Math.max(...range.map((r) => r.length)), 18);
+  assert.equal(C.ring2Of(9, 18), C.ring2Of(9, 18), 'cached like nbrsOf');
+  assert.deepEqual(C.ring2Of(9, 18), range);
+});
+
+test('Sunflower Field: one kind, 9 × 18, Scouts, pickable — appended after the Queen\'s Frame', () => {
+  const h = C.hiveById('sunflower');
+  assert.equal(h.name, 'Sunflower Field');
+  assert.deepEqual([h.cols, h.rows, h.queens, h.broken, h.puffs], [9, 18, 0, 0, 1]);
+  assert.ok(h.scouts > 0 && h.guards > 0);
+  assert.equal(C.HIVES.at(-1), h, 'appended: no other hive moves');
+  // prefs.hive is an index into PICKABLE: the first three keep theirs
+  assert.deepEqual(C.PICKABLE.map((x) => x.id), ['clover', 'apple', 'wildflowers', 'sunflower']);
+  assert.equal(C.boardCode('sunflower', 35), 'SU-000000Z');
+  assert.deepEqual(C.parseCode('su-000000z'), { hive: 'sunflower', seed: 35 });
+  // a Scout's reading is one number: no hive puts them on two kinds
+  for (const x of C.HIVES) assert.ok(!(x.scouts && x.queens), `${x.id} mixes Scouts and two kinds`);
+});
+
+test('no hive but Sunflower Field has a Scout; adding it moved no other frame', () => {
+  for (const h of C.HIVES.filter((x) => x.id !== 'sunflower')) {
+    for (const seed of [1, 7, 0xabc]) assert.ok(C.generate(h.id, seed).scout.every((v) => v === 0), h.id);
+  }
+  // the same prints as "adding the Queen's Frame moved no other hive's frames"
+  const fp = (f) => [...f.cells, ...f.shown, ...f.shownH, ...f.broken, f.start]
+    .reduce((h, c, i) => (Math.imul(h ^ (c * 31 + i), 16777619) >>> 0), 2166136261);
+  assert.equal(fp(C.generate('clover', 7)), 3445885415);
+  assert.equal(fp(C.generate('apple', 7)), 4092483904);
+  assert.equal(fp(C.generate('wildflowers', 7)), 604351643);
+});
+
+test('Scouts: clueOf names the range, they never flood, and a sweep on one is refused', () => {
+  const s = C.newGame('sunflower', 7);
+  const nb = C.nbrsOf(s.cols, s.rows), range = C.ring2Of(s.cols, s.rows);
+  const scouts = s.scout.flatMap((v, i) => (v ? [i] : []));
+  assert.equal(scouts.length, C.hiveById('sunflower').scouts);
+  for (const i of scouts) {
+    assert.ok(C.isScout(s, i));
+    assert.equal(C.rangeOf(s, i), range[i]);
+    assert.equal(C.clueOf(s, i).over, range[i]);
+    assert.equal(C.floods(s, i), false);
+  }
+  const plain = s.open.findIndex((o, i) => o && !C.isScout(s, i));
+  assert.equal(C.rangeOf(s, plain), nb[plain]);
+  assert.equal(C.clueOf(s, plain).over, undefined);
+  // a zero Scout still doesn't flood
+  assert.equal(C.floods({ ...s, shown: s.shown.map(() => 0), shownH: s.shownH.map(() => 0) }, scouts[0]), false);
+
+  // uncap a Scout: it opens alone
+  const i = scouts.find((c) => !s.open[c]);
+  assert.ok(C.reveal(s, i));
+  assert.deepEqual(s.events.at(-1), { type: 'uncap', cell: i, cells: [i] });
+  // mark every guard in its range truthfully: still no sweep, nothing moves
+  for (const j of range[i]) if (s.cells[j] === C.G) C.setMark(s, j, C.MARK_G);
+  const before = JSON.stringify(s);
+  assert.equal(C.sweep(s, i), false, 'a Scout is never swept');
+  assert.equal(C.tap(s, i), false);
+  assert.equal(JSON.stringify(s), before);
+});
+
+test('saves from before #12 carry no scout array: no cell is a Scout, and play goes on', () => {
+  const s = C.newGame('clover', 9);
+  delete s.scout;
+  const back = JSON.parse(JSON.stringify({ ...s, events: [] }));
+  assert.equal(C.isScout(back, back.start), false);
+  assert.deepEqual(C.clueOf(back, back.start), { guards: 0, queens: 0 });
+  assert.ok(C.floods(back, back.start));
+  assert.ok(C.provenNow(back).safe.size > 0);
+  const i = back.open.findIndex((o, k) => !o && back.cells[k] === C.EMPTY);
+  assert.ok(C.reveal(back, i));
+});
+
+test('Sunflower Field generation budget: 1,000 seeds, median tries ≤ 10, max well under MAX_TRIES', () => {
+  const tries = [], ms = [];
+  for (let seed = 1; seed <= 1000; seed++) {
+    const t0 = performance.now();
+    tries.push(C.generate('sunflower', seed).tries);
+    ms.push(performance.now() - t0);
+  }
+  tries.sort((a, b) => a - b);
+  ms.sort((a, b) => a - b);
+  const median = tries[500], max = tries.at(-1);
+  console.log(`# sunflower tries: median ${median}, p90 ${tries[900]}, max ${max}; ms: median ${ms[500].toFixed(2)}, p99 ${ms[990].toFixed(1)}, max ${ms.at(-1).toFixed(1)}`);
+  assert.ok(median <= 10, `median tries ${median}`);
+  assert.ok(max <= C.MAX_TRIES / 20, `max tries ${max} of ${C.MAX_TRIES}`);
+});
+
+test('Scouts matter: most Sunflower frames can\'t be finished with their Scouts read as blank comb', () => {
+  let need = 0;
+  for (let seed = 1; seed <= 100; seed++) {
+    const f = C.generate('sunflower', seed);
+    assert.ok(C.solvable(f));
+    if (!C.solvable({ ...f, broken: f.broken.map((b, i) => b || f.scout[i]) })) need++;
+  }
+  assert.ok(need >= 50, `only ${need} of 100 frames needed a Scout`);
+});
+
+test('the daily rotation: unchanged through the day before Sunflower Field joins, all four after', () => {
+  const old = ['clover', 'apple', 'wildflowers'];
+  const day = (d) => Math.floor(Date.parse(`${d}T00:00:00Z`) / 86400000);
+  const from = C.hiveById('sunflower').dailyFrom;
+  assert.match(from, /^\d{4}-\d{2}-\d{2}$/);
+  // after this issue's release (2026-09-30): today's daily never switches
+  // hive under a player, and every past daily log entry keeps its hive
+  assert.ok(from > '2026-09-30', 'Sunflower Field joins the daily only after the release');
+  const dates = [];
+  for (let t = Date.UTC(2025, 0, 1); ; t += 86400000) {
+    const d = new Date(t).toISOString().slice(0, 10);
+    if (d >= from) break;
+    dates.push(d);
+  }
+  assert.ok(dates.length > 600);
+  for (const d of dates) assert.equal(C.dailyHive(d), old[day(d) % 3], d);
+  // from its first day: Sunflower Field leads, then all four take turns
+  const after = [];
+  for (let k = 0; k < 40; k++) after.push(C.dailyHive(new Date(Date.parse(`${from}T00:00:00Z`) + k * 86400000).toISOString().slice(0, 10)));
+  assert.equal(after[0], 'sunflower');
+  for (let k = 0; k + 4 <= after.length; k += 4) {
+    assert.deepEqual([...after.slice(k, k + 4)].sort(), ['apple', 'clover', 'sunflower', 'wildflowers']);
+  }
+  assert.deepEqual(after.slice(0, 4), ['sunflower', 'clover', 'apple', 'wildflowers']);
+  // never the hidden Queen's Frame
+  assert.ok(!after.includes('queen'));
 });

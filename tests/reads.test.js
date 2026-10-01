@@ -229,7 +229,7 @@ test('specific sentences only for a full one-clue proof; everything else gets th
         const generic = `These numbers proved a ${kind === C.QUEEN ? "queen's guard" : 'guard'} was sleeping there.`;
         if (kind === C.QUEEN) seen.queen++;
         const [c] = l.clues;
-        const full = l.clues.length === 1 && !s.broken[c]
+        const full = l.clues.length === 1 && !s.broken[c] && !C.isScout(s, c)   // a Scout's proof is generic (#12)
           && s.shown[c] + s.shownH[c] === nb[c].filter((j) => j === g || !s.open[j]).length;
         if (!full) { assert.equal(l.text, generic); seen.generic++; continue; }
         const n = s.shown[c] + s.shownH[c];
@@ -240,4 +240,31 @@ test('specific sentences only for a full one-clue proof; everything else gets th
     }
   }
   assert.ok(seen.one && seen.many && seen.generic && seen.queen, JSON.stringify(seen));
+});
+
+// ── Scouts (#12) ────────────────────────────────────────────────────────────
+
+test('Scouts: a tap on one names no sweep, a sting proved by one gets the generic sentence', () => {
+  const s = C.newGame('sunflower', 7);
+  const sc = s.scout.findIndex((v, i) => v && !s.open[i]);
+  assert.deepEqual(Reads.moveAt(s, sc), { type: 'reveal', cell: sc, targets: [sc] }, 'capped: an ordinary reveal');
+  const { move } = play(s, Reads.fresh(), sc);
+  assert.ok(move && s.open[sc]);
+  assert.equal(Reads.moveAt(s, sc), null, 'uncapped: never a sweep');
+  const g = C.ring2Of(s.cols, s.rows)[sc].find((j) => s.cells[j] === C.G);
+  assert.equal(Reads.sentence(s, sc, g, C.GUARD), null);
+});
+
+test('Sunflower Field: a solver-driven clear is Pure, every move clean', () => {
+  for (const seed of [3, 11, 29]) {
+    const s = C.newGame('sunflower', seed);
+    let reads = Reads.fresh();
+    while (s.phase === 'play') {
+      const [i] = C.provenNow(s).safe;
+      assert.ok(i !== undefined, `sunflower/${seed}: something is always provable`);
+      ({ reads } = play(s, reads, i));
+    }
+    assert.equal(s.phase, 'won');
+    assert.ok(Reads.isPure(reads));
+  }
 });
