@@ -36,7 +36,8 @@ test('the rules import under node with no Arcade global and no DOM in sight', as
   // two phones would stop agreeing on the same seed.
   assert.equal(typeof globalThis.Arcade, 'undefined');
   assert.equal(typeof globalThis.document, 'undefined');
-  for (const f of ['core.js', 'solver.js', 'hex.js', 'migrate.js']) {
+  // (mixer.js too: the sound decisions are replayable, so they take `now` as an argument)
+  for (const f of ['core.js', 'solver.js', 'hex.js', 'migrate.js', 'mixer.js']) {
     await assert.doesNotReject(() => import(`../${f}`));
     // code only: the header comment names the very things it forbids
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8')
@@ -88,12 +89,13 @@ test('sw.js cleans up only its own caches and never activates unannounced', () =
 // ── staging declaration ──────────────────────────────────────────────────
 test('stage.mjs publishes what the page and manifest name, and drops the dev set', () => {
   for (const f of ['index.html', 'main.js', 'core.js', 'hex.js', 'solver.js', 'migrate.js', 'arcade-rng.js', 'render.js',
-    'input.js', 'audio.js', 'soundpack.js', 'style.css', 'manifest.json', 'sw.js', 'icon.svg', 'icon.png']) {
+    'input.js', 'audio.js', 'mixer.js', 'soundpack.js', 'style.css', 'manifest.json', 'sw.js', 'icon.svg', 'icon.png']) {
     assert.ok(tracked.includes(f), `${f} is not tracked`);
     assert.ok(!isDevOnly(f), `${f} would be dropped from the deploy`);
   }
   for (const f of ['README.md', 'package.json', '.gitignore', 'docs/design.md', 'tools/stage.mjs',
-    'tools/e2e.mjs', 'tests/core.test.js', 'tests/solver.test.js', 'tests/migrate.test.js', '.github/workflows/pages.yml']) {
+    'tools/e2e.mjs', 'tests/core.test.js', 'tests/solver.test.js', 'tests/migrate.test.js',
+    'tests/sound.test.js', 'tests/audio.test.js', 'tools/audition.js', 'tools/soundpack.config.json', 'tools/sound-levels.mjs', '.github/workflows/pages.yml']) {
     assert.ok(isDevOnly(f), `${f} would ship to the public site`);
   }
   assert.deepEqual(PRECACHE_EXCLUDE, ['LICENSE'], 'the exclusion list is meant to stay minimal');
