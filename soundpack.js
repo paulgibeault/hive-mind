@@ -105,6 +105,18 @@
         { ratio: 4.95, gain: 0.07, decay: 0.06 },
       ],
     },
+    // Sunflower Field (#12): a sun-warmed steel tongue drum — harmonic
+    // partials (1 : 2 : 3), so it rings round and golden where clover's
+    // marimba knocks, a little lower and longer — major pentatonic on G,
+    // with a short bright echo, like its honey: golden, bright
+    'sunflower': {
+      root: 392, ladder: PENTA, tone: 3400, echo: { at: 0.055, gain: 0.18 }, drop: 2900,
+      partials: [
+        { ratio: 1.0, gain: 1.0, decay: 0.48 },
+        { ratio: 2.0, gain: 0.28, decay: 0.2 },
+        { ratio: 3.0, gain: 0.1, decay: 0.08 },
+      ],
+    },
   };
 
   const hiveOf = (p) => HIVE[p.hive] || HIVE.clover;
@@ -211,7 +223,9 @@
   // lightness(hive, seed), copied because the pack loads as a plain script;
   // tests/honey.test.js holds the two to the same numbers. Clover is pale
   // (with a tiny seeded wobble), apple amber, wildflowers amber to russet by
-  // seed, and the Queen's Frame (#10) dark.
+  // seed, the Queen's Frame (#10) dark, and Sunflower Field (#12) golden,
+  // with its own small wobble.
+
   const honeyMix = (seed, salt) => {
     let h = (Math.imul((seed >>> 0) ^ 0x9e3779b9, 0x85ebca6b) ^ salt) >>> 0;
     h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
@@ -228,6 +242,7 @@
     }
     if (p.hive === 'apple') return 0.5676;
     if (p.hive === 'queen') return 0.1667;
+    if (p.hive === 'sunflower') return 0.5843 + (honeyUnit(seed, 13) * 2 - 1) * 0.015;
     return 0.8343 + (honeyUnit(seed, 7) * 2 - 1) * 0.015;
   };
 

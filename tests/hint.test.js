@@ -204,3 +204,65 @@ test('the hint never lights a cell that isn\'t provable: 1,200 mid-game states, 
   assert.ok(safe > 800 && ghosts > 300 && specific > 100, `vacuous: ${safe} safe, ${guard} guard, ${ghosts} ghosts, ${specific} specific`);
   assert.ok(fallbacks < 12, `the fallback is rare (${fallbacks})`);
 });
+
+// ── Scouts (#12) ────────────────────────────────────────────────────────────
+
+test('Sunflower Field: the hint lights only provable cells, and a Scout\'s proof gets the generic line', () => {
+  const rnd = makeRng(1201);
+  let moves = 0, scoutProofs = 0, specific = 0, scoutRings = 0;
+  for (let k = 0; k < 300; k++) {
+    const s = midGame('sunflower', 1 + (k % 61), rnd);
+    if (s.phase !== 'play') continue;
+    const last = rnd() < 0.25 ? -1 : rnd.int(0, s.open.length - 1);
+    const p = C.provenNow(s);
+    const h = Hint.pickHint(s, last, p);
+    if (!h) continue;
+    for (const c of h.clues) assert.ok(s.open[c] && !s.broken[c] && s.cells[c] === C.EMPTY, `#${k}: ring ${c}`);
+    if (h.clues.some((c) => C.isScout(s, c))) scoutRings++;
+    if (h.kind !== 'move') continue;
+    moves++;
+    assert.ok(!s.open[h.target]);
+    assert.equal(h.value === C.SAFE ? C.EMPTY : C.G, s.cells[h.target], `#${k}: ${h.target}`);
+    assert.deepEqual(C.minimalProof(s, h.target, p), { value: h.value, clues: h.clues });
+    for (const g of h.ghosts) assert.equal(s.cells[g.i], C.G, `#${k}: ghost ${g.i}`);
+    if (h.clues.some((c) => C.isScout(s, c))) {
+      scoutProofs++;
+      assert.ok(h.why === Hint.GENERIC || h.why === `${Hint.GENERIC} Mark it.`, `#${k}: "${h.why}"`);
+    } else if (!h.why.startsWith(Hint.GENERIC)) specific++;
+  }
+  assert.ok(moves > 200 && specific > 20, `vacuous: ${moves} moves, ${specific} specific`);
+  assert.ok(scoutRings > 0, 'some hint rings a Scout');
+  // and any one-Scout proof that happens to be "full" over its neighbours
+  // still gets the generic line: the sentence would talk about neighbours
+  const s = C.newGame('sunflower', 7);
+  const sc = s.scout.findIndex((v) => v);
+  s.open[sc] = 1;
+  const g = C.ring2Of(s.cols, s.rows)[sc].find((j) => s.cells[j] === C.G);
+  assert.equal(Hint.whyLine(s, { target: g, value: C.GUARD, clues: [sc] }), `${Hint.GENERIC} Mark it.`);
+  console.log(`# sunflower hints: ${moves} moves, ${scoutProofs} proved with a Scout`);
+});
+
+test('Scouts: the fallback and the "capped cells a clue touches" count a Scout\'s whole range', () => {
+  // a Sunflower frame with only one Scout uncapped (and the opening): its
+  // range's capped cells are what the group is built from
+  let checked = 0;
+  for (let seed = 1; seed <= 20; seed++) {
+    const s = C.newGame('sunflower', seed);
+    const range = C.ring2Of(s.cols, s.rows);
+    for (const sc of s.scout.flatMap((v, i) => (v && !s.open[i] ? [i] : []))) {
+      const t = structuredClone(s);
+      C.reveal(t, sc);
+      // every other uncapped cell read as blank: the Scout is the only clue
+      const masked = { ...t, broken: t.broken.map((b, i) => (t.open[i] && i !== sc ? 1 : 0)) };
+      const capped = range[sc].filter((j) => !t.open[j]);
+      if (t.shown[sc] === 0 || t.shown[sc] === capped.length) continue;    // those prove their whole range
+      const p = C.provenNow(masked);
+      assert.equal(p.safe.size + p.guard.size, 0, 'a lone Scout, neither 0 nor full, proves nothing');
+      const h = Hint.pickHint(masked, sc, p);
+      assert.deepEqual({ kind: h.kind, clues: h.clues }, { kind: 'fallback', clues: [sc] });
+      checked++;
+    }
+  }
+  assert.ok(checked > 50, `only ${checked}`);
+});
+

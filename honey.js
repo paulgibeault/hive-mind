@@ -11,6 +11,7 @@
  *   apple         amber, fruity    #e8a846 → #dd9a38
  *   wildflowers   no two alike     two tones from the seed: hue 18–40°, lightness 24–56%
  *   queen         dark, royal      #5a2c0e → #3a1c08 (the Queen's Frame, #10)
+ *   sunflower     golden, bright   #f7c548 → #eaa92b, a tiny seeded lightness wobble (#12)
  *
  * `queen` is the Queen's Frame, the weekly hive (#10): its jars are royal
  * honey, the same dark pair for every week.
@@ -25,16 +26,19 @@ export const HONEY = Object.freeze({
   apple: { note: 'amber, fruity', name: 'apple blossom honey' },
   wildflowers: { note: 'no two alike', name: 'wildflower honey' },
   queen: { note: 'dark, royal', name: 'royal honey' },
+  sunflower: { note: 'golden, bright', name: 'sunflower honey' },
 });
 
 // The fixed hives' colours, as the table above gives them, and the mean HSL
-// lightness of each pair (what the clink hears).
+// lightness of each pair (what the clink hears). `wobble`: the salt of a
+// tiny seeded lightness shift, for the hives that have one.
 const FIXED = {
-  clover: { top: '#fff0b8', bottom: '#fbe7a1', light: 0.8343 },
+  clover: { top: '#fff0b8', bottom: '#fbe7a1', light: 0.8343, wobble: 7 },
   apple: { top: '#e8a846', bottom: '#dd9a38', light: 0.5676 },
   queen: { top: '#5a2c0e', bottom: '#3a1c08', light: 0.1667 },
+  sunflower: { top: '#f7c548', bottom: '#eaa92b', light: 0.5843, wobble: 13 },
 };
-const CLOVER_WOBBLE = 0.015;      // ± this much lightness, by seed
+const CLOVER_WOBBLE = 0.015;      // ± this much lightness, by seed (Sunflower Field's too)
 
 // Wildflowers' band.
 export const WILD = Object.freeze({
@@ -92,8 +96,8 @@ function blend(seed) {
   return { hue, lean, lo, hi: lo + lift, sat };
 }
 
-/** The clover wobble for a seed: a lightness shift in [-CLOVER_WOBBLE, CLOVER_WOBBLE]. */
-const wobble = (seed) => (unit(seed, 7) * 2 - 1) * CLOVER_WOBBLE;
+/** The wobble for a seed: a lightness shift in [-CLOVER_WOBBLE, CLOVER_WOBBLE]. */
+const wobble = (seed, salt) => (unit(seed, salt) * 2 - 1) * CLOVER_WOBBLE;
 
 /**
  * The honey for a frame: { top, bottom }, two #rrggbb colours for a jar's
@@ -106,8 +110,8 @@ export function honeyColour(hive, seed) {
     return { top: hslHex(w.hue + w.lean, w.sat, w.hi), bottom: hslHex(w.hue, w.sat, w.lo) };
   }
   const f = FIXED[hive] || FIXED.clover;
-  if (f !== FIXED.clover) return { top: f.top, bottom: f.bottom };
-  const dl = wobble(seed);
+  if (!f.wobble) return { top: f.top, bottom: f.bottom };
+  const dl = wobble(seed, f.wobble);
   const shift = (hex) => { const [h, s, l] = hexHsl(hex); return hslHex(h, s, clamp01(l + dl)); };
   return { top: shift(f.top), bottom: shift(f.bottom) };
 }
@@ -120,5 +124,6 @@ export function lightness(hive, seed) {
   seed >>>= 0;
   if (hive === 'wildflowers') { const w = blend(seed); return (w.lo + w.hi) / 2; }
   const f = FIXED[hive] || FIXED.clover;
-  return f === FIXED.clover ? f.light + wobble(seed) : f.light;
+  return f.wobble ? f.light + wobble(seed, f.wobble) : f.light;
+
 }

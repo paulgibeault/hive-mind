@@ -28,11 +28,13 @@ const NOTES = {
   clover: 'Plain comb, one kind of guard. Where every hive starts.',
   apple: "Guards and the queen's guards. Every cell counts each kind separately.",
   wildflowers: 'Some comb is broken: safe, but it tells you nothing.',
+  sunflower: 'Scouts, with a double rim, count every guard up to two cells away.',
 };
 const MARKS = {
   clover: '<i></i>',
   apple: '<i></i><i class="q"></i>',
   wildflowers: '<i></i><i class="b"></i>',
+  sunflower: '<i></i><i class="s"></i>',
 };
 
 let s = null;                 // the core state, or null in the menu
@@ -170,12 +172,12 @@ function newFrame() {
 
 // ── the daily frame ──────────────────────────────────────────────────────
 // One frame a day for everyone, rolling at local midnight (Arcade.daily).
-// The hive rotates with the day so each kind comes round every third day.
+// The hive rotates with the day (Core.dailyHive): never the hidden Queen's
+// Frame (#10), and a new hive joins only from its `dailyFrom` date (#12), so
+// no day already dealt changes hive.
 function today() {
   const date = Arcade.daily.dateStr();
-  const day = Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000);
-  const n = Core.PICKABLE.length;                    // never the hidden Queen's Frame (#10)
-  const hive = Core.PICKABLE[((day % n) + n) % n].id;
+  const hive = Core.dailyHive(date);
   const seed = Arcade.daily.seed().int(0, 0xfffffffe) >>> 0;
   return { date, hive, seed };
 }
@@ -267,7 +269,10 @@ let picked = null;                  // the jar the pantry's detail card shows
 let clink = null;
 
 const pantryNow = () => Pantry.normalize(Arcade.stats.get('pantry'));
-const shelfHives = () => Core.HIVES;                // every hive has a shelf, the Queen's Frame's too (#10)
+// every hive has a shelf, the Queen's Frame's too (#10): the pickable ones
+// in selector order, then the weekly one
+const shelfHives = () => [...Core.PICKABLE, ...Core.HIVES.filter((h) => h.hidden)];
+
 const hiveName = (id) => (shelfHives().find((h) => h.id === id) || { name: id }).name;
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const jarLabel = (j) => [hiveName(j.hive), Pantry.shortDate(j.date), fmt(j.ms), j.pure && 'pure'].filter(Boolean).join(', ');

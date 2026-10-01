@@ -4,8 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { solve, SAFE, GUARD, QUEEN, PROOF_MAX } from '../solver.js';
-import { neighbours } from '../hex.js';
+import { solve, provenNow, SAFE, GUARD, QUEEN, PROOF_MAX } from '../solver.js';
+import { neighbours, ring2 } from '../hex.js';
 import { makeRng } from '../arcade-rng.js';
 import * as C from '../core.js';
 
@@ -242,8 +242,8 @@ function bruteForce(nbrs, opened, clueAt, kinds) {
   const clues = [...Array(n).keys()].filter((i) => opened[i] && clueAt(i));
   const fits = () => clues.every((c) => {
     let g = 0, q = 0;
-    for (const j of nbrs[c]) { if (val[j] === GUARD) g++; else if (val[j] === QUEEN) q++; }
     const want = clueAt(c);
+    for (const j of want.over || nbrs[c]) { if (val[j] === GUARD) g++; else if (val[j] === QUEEN) q++; }
     return g === want.guards && q === want.queens;
   });
   const go = (k) => {
@@ -376,7 +376,8 @@ test('after a sting, the stung cell reads as it did just before the tap', () => 
 /* Do these clues ALONE prove that cell i is `value`? Independent of the
  * solver: enumerate every assignment of the hidden cells they touch. */
 function provesAlone(s, clueCells, i, value) {
-  const nbrs = C.nbrsOf(s.cols, s.rows);
+  const nbrs = { length: s.open.length };                  // each clue's own scope: a Scout's is its range (#12)
+  for (const c of clueCells) nbrs[c] = C.rangeOf(s, c);
   const cells = [...new Set(clueCells.flatMap((c) => nbrs[c].filter((j) => !s.open[j])))];
   if (!cells.includes(i)) return false;
   const bits = BIT.filter((b) => (s.queens ? 7 : 3) & b);
@@ -446,6 +447,7 @@ test('generation is unchanged by #2 (fingerprint of seeds 1–300, every hive)',
     apple: '03e25b1e04cdf78aa2afe7e7e8f8e4eb09dd637f9de8e50ff13dd6a85115229b',
     wildflowers: '0eed28e057c14470ea69b7a5acfcc449f43d2860122eb5960f52229f80ef783a',   // re-pinned when Wildflowers moved to 26 guards / 12 broken
     queen: 'fd1cfdfd63ef58884ec85d11d8905d43850a6066e1f3f101246ab277b4ddc865',   // #10, pinned when it was added (21 + 12 guards, 10 broken)
+    sunflower: '0b58e06de51cbe41e1b66486c06f64d217495906593f556e1db79a5f1a3b1c69',   // #12, pinned when it was added (32 guards, 8 Scouts)
   };
   for (const h of C.HIVES) {
     const hash = createHash('sha256');
@@ -454,5 +456,148 @@ test('generation is unchanged by #2 (fingerprint of seeds 1–300, every hive)',
       hash.update(JSON.stringify([f.start, f.tries, f.cells, f.shown, f.shownH, f.broken]));
     }
     assert.equal(hash.digest('hex'), want[h.id], h.id);
+  }
+});
+
+// ── Scouts: clues two steps wide (#12) ──────────────────────────────────────
+
+test('Sunflower Field\'s Scout positions are pinned too (seeds 1–300)', () => {
+  const hash = createHash('sha256');
+  for (let seed = 1; seed <= 300; seed++) hash.update(JSON.stringify(C.generate('sunflower', seed).scout));
+  assert.equal(hash.digest('hex'), '6540c89983d41c9902b5b1db3378c86c8d8ce30c7b938c49b1272e5324ad7c3d');
+});
+
+test('solve() with one Scout clue is exact against brute force over its range', () => {
+  // 5×5, the centre cell (12) an opened Scout counting all 18... of its 18
+  // cells in range; every layout of a sample: the solver must say exactly
+  // what enumerating its range says
+  const cols = 5, rows = 5, n = 25, c = 12;
+  const nbrs = neighbours(cols, rows), range = ring2(cols, rows)[c];
+  assert.equal(range.length, 18);
+  let decided = 0;
+  for (let t = 0; t < 400; t++) {
+    const rnd = makeRng(9000 + t);
+    const cells = [...Array(n)].map((_, i) => (i !== c && rnd() < 0.15 + 0.7 * (t % 5) / 4 * 0.5 ? 1 : 0));
+    const clue = range.filter((j) => cells[j]).length;
+    const dom = new Uint8Array(n).fill(3);
+    const opened = new Uint8Array(n);
+    opened[c] = 1; dom[c] = SAFE;
+    solve(nbrs, dom, (i) => (i === c ? { guards: clue, queens: 0, over: range } : null), () => {}, opened);
+    // brute force: the clue alone constrains only the count over its range
+    const k = range.length;
+    const want = clue === 0 ? SAFE : clue === k ? GUARD : 3;
+    for (const j of range) { assert.equal(dom[j], want, `t${t} clue ${clue} cell ${j}`); if (want !== 3) decided++; }
+    for (let j = 0; j < n; j++) if (j !== c && !range.includes(j)) assert.equal(dom[j], 3, 'nothing outside the range');
+  }
+  assert.ok(decided > 0);
+});
+
+/* A small hand-built frame with Scouts on some safe cells: shown counts over
+ * each cell's own scope, as core.js stores them. */
+function scoutFrame(cols, rows, rnd, density) {
+  const n = cols * rows;
+  const nbrs = neighbours(cols, rows), range = ring2(cols, rows);
+  const cells = [...Array(n)].map(() => (rnd() < density ? C.G : C.EMPTY));
+  const scout = cells.map((v) => (v === C.EMPTY && rnd() < 0.35 ? 1 : 0));
+  const shown = cells.map((_, i) => (scout[i] ? range[i] : nbrs[i]).filter((j) => cells[j] === C.G).length);
+  return { cols, rows, queens: 0, guards: cells.filter((v) => v).length, cells, scout, shown, shownH: cells.map(() => 0), broken: cells.map(() => 0) };
+}
+
+test('provenNow equals brute force on small frames with Scouts (≤ 5×5)', () => {
+  const rnd = makeRng(1212);
+  let decided = 0, tried = 0, scoutsOpen = 0, byScout = 0;
+  for (let t = 0; t < 500; t++) {
+    const cols = rnd.int(3, 5), rows = rnd.int(3, 5), n = cols * rows;
+    const f = scoutFrame(cols, rows, rnd, 0.3);
+    const nbrs = neighbours(cols, rows);
+    const open = new Array(n).fill(0);
+    const safeCells = f.cells.flatMap((c, i) => (c === C.EMPTY ? [i] : []));
+    for (const i of safeCells) if (rnd() < 0.5) open[i] = 1;
+    for (const i of safeCells) if (open.filter((o) => !o).length > 12) open[i] = 1;
+    if (open.filter((o) => !o).length > 12) continue;
+    if (open.some((o, i) => o && f.scout[i])) scoutsOpen++;
+    const s = { ...f, open, mark: new Array(n).fill(0) };
+
+    const want = bruteForce(nbrs, Uint8Array.from(open), (i) => C.clueOf(f, i), 3);
+    // the same frame with its Scouts blanked: what the Scouts alone added
+    const blank = bruteForce(nbrs, Uint8Array.from(open), (i) => (f.scout[i] ? null : C.clueOf(f, i)), 3);
+    const p = C.provenNow(s);
+    for (let i = 0; i < n; i++) {
+      if (open[i]) continue;
+      const got = p.safe.has(i) ? SAFE : p.guard.get(i) ?? 0;
+      const exact = BIT.includes(want[i]) ? want[i] : 0;
+      assert.equal(got, exact, `t${t} ${cols}×${rows} cell ${i}: brute ${want[i]}`);
+      if (exact) decided++;
+      if (exact && !BIT.includes(blank[i])) byScout++;
+    }
+    tried++;
+  }
+  assert.ok(tried > 300 && decided > 300 && scoutsOpen > 200 && byScout > 50,
+    `vacuous: ${tried} frames, ${decided} decided, ${scoutsOpen} with a Scout open, ${byScout} decided only by a Scout`);
+});
+
+test('Scouts: provenNow is sound and never peeks, on 600 mid-game Sunflower states', () => {
+  const rnd = makeRng(1213);
+  let safe = 0, guard = 0;
+  for (let k = 0; k < 600; k++) {
+    const s = midGame('sunflower', 1 + (k % 97), rnd);
+    const p = C.provenNow(s);
+    for (const i of p.safe) { assert.ok(!s.open[i] && s.cells[i] === C.EMPTY, `#${k}: ${i} not safe`); safe++; }
+    for (const [i, kind] of p.guard) { assert.ok(!s.open[i] && s.cells[i] === C.G, `#${k}: ${i}`); assert.equal(kind, GUARD); guard++; }
+    if (k % 4) continue;
+    // a capped Scout is any cap: reading whether a hidden cell is a Scout
+    // throws, and so does any hidden contents or mark
+    const b = blindfold(s);
+    b.scout = new Proxy(s.scout, {
+      get(t, key) {
+        if (typeof key === 'string' && /^\d+$/.test(key) && !s.open[+key]) throw new Error(`peeked at scout[${key}]`);
+        return t[key];
+      },
+    });
+    assert.deepEqual(asPlain(C.provenNow(b)), asPlain(p));
+    for (const i of [...p.safe, ...p.guard.keys()].slice(0, 3)) assert.deepEqual(C.minimalProof(b, i), C.minimalProof(s, i, p));
+  }
+  assert.ok(safe > 1000 && guard > 1000, `vacuous: ${safe} safe, ${guard} guard`);
+});
+
+test('Scouts: minimal proofs prove the cell, and no smaller set does (brute force, sizes ≤ 3)', () => {
+  const rnd = makeRng(4321);
+  const sizes = new Map();
+  let small = 0, withScout = 0;
+  for (let k = 0; k < 70; k++) {
+    const s = midGame('sunflower', 600 + k, rnd);
+    const p = C.provenNow(s);
+    const clueCells = s.open.flatMap((o, c) => (o && C.clueOf(s, c) ? [c] : []));
+    for (const i of [...p.safe, ...p.guard.keys()]) {
+      const r = C.minimalProof(s, i, p);
+      assert.equal(r.value, s.cells[i] === C.EMPTY ? SAFE : GUARD);
+      assert.ok(provesAlone(s, r.clues, i, r.value), `#${k} cell ${i}: [${r.clues}] does not prove it`);
+      sizes.set(r.clues.length, (sizes.get(r.clues.length) || 0) + 1);
+      if (r.clues.some((c) => C.isScout(s, c))) withScout++;
+      if (r.clues.length > 3) continue;
+      for (let size = 1; size < r.clues.length; size++) {
+        for (const sub of subsets(clueCells, size)) {
+          if (!sub.some((c) => C.rangeOf(s, c).includes(i))) continue;
+          assert.ok(!provesAlone(s, sub, i, r.value), `#${k} cell ${i}: [${sub}] beats [${r.clues}]`);
+        }
+      }
+      small++;
+    }
+  }
+  assert.ok(small > 500 && withScout > 20 && sizes.get(2) > 50, `vacuous: ${small} small, ${withScout} with a Scout, ${JSON.stringify([...sizes])}`);
+});
+
+test('the wide pass only runs with a Scout on screen: no-Scout clue sets solve as before', () => {
+  // the same clue function with and without an explicit `over` equal to the
+  // neighbours: a plain clue named wide reaches the same verdict
+  const rnd = makeRng(55);
+  for (let t = 0; t < 60; t++) {
+    const s = midGame(C.HIVES[t % 3].id, 900 + t, rnd);
+    const nbrs = C.nbrsOf(s.cols, s.rows);
+    const opened = Uint8Array.from(s.open, (o, i) => (o && s.cells[i] === C.EMPTY ? 1 : 0));
+    const kinds = s.queens ? 7 : 3;
+    const plain = provenNow(nbrs, opened, (i) => C.clueOf(s, i), kinds);
+    const wide = provenNow(nbrs, opened, (i) => { const c = C.clueOf(s, i); return c && { ...c, over: nbrs[i] }; }, kinds);
+    assert.deepEqual(asPlain(wide), asPlain(plain), `t${t}`);
   }
 });

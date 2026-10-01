@@ -41,7 +41,7 @@ const rows = await page.evaluate(async ({ TARGETS, PARAMS }) => {
   const out = {};
   for (const name of Object.keys(TARGETS)) {
     let eRms = 0, ePeak = 0, n = 0;
-    for (const hive of ['clover', 'apple', 'wildflowers']) {
+    for (const hive of ['clover', 'apple', 'wildflowers', 'sunflower']) {
       for (let k = 0; k < 8; k++) {
         const ctx = new OfflineAudioContext(2, Math.ceil((LEAD + SPAN) * SR), SR);
         const bus = S.createBus(ctx, ctx.destination, P.ROOM);

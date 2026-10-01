@@ -21,7 +21,7 @@ const dist = (a, b) => {
 };
 
 test('deterministic: the same (hive, seed) always gives the same honey', () => {
-  for (const hive of ['clover', 'apple', 'wildflowers', 'queen']) {
+  for (const hive of ['clover', 'apple', 'wildflowers', 'queen', 'sunflower']) {
     for (const seed of [0, 1, 7, 0xabc, 0xffffffff, 123456789]) {
       const a = honeyColour(hive, seed), b = honeyColour(hive, seed);
       assert.deepEqual(a, b);
@@ -68,12 +68,21 @@ test('the fixed hives sit on their table colours; Clover only wobbles a little',
     assert.ok(near(hexHsl(c.top)[2], hexHsl('#fff0b8')[2], 0.017));
   }
   assert.ok(new Set(clovers.map((c) => c.bottom)).size > 3, 'but it does wobble');
+  // Sunflower Field (#12): golden, bright, with a wobble of its own
+  const suns = SEEDS.map((s) => honeyColour('sunflower', s));
+  for (const c of suns) {
+    assert.ok(dist(c.top, '#f7c548') < 12, `sunflower top ${c.top}`);
+    assert.ok(dist(c.bottom, '#eaa92b') < 12, `sunflower bottom ${c.bottom}`);
+  }
+  assert.ok(new Set(suns.map((c) => c.bottom)).size > 3, 'sunflower wobbles too');
+  assert.notDeepEqual(SEEDS.map((s) => lightness('sunflower', s) - 0.5843), SEEDS.map((s) => lightness('clover', s) - 0.8343),
+    'by its own salt, not in step with clover');
   // an unknown hive falls back to clover rather than throwing
   assert.match(honeyColour('somewhere', 3).top, HEX);
 });
 
 test('lightness is the honey\'s own: the mean HSL lightness of its two tones', () => {
-  for (const hive of ['clover', 'apple', 'wildflowers', 'queen']) {
+  for (const hive of ['clover', 'apple', 'wildflowers', 'queen', 'sunflower']) {
     for (const seed of SEEDS) {
       const c = honeyColour(hive, seed);
       const l = (hexHsl(c.top)[2] + hexHsl(c.bottom)[2]) / 2;
@@ -127,7 +136,7 @@ test('the jar clink pitch follows honey.js: paler honey rings higher', () => {
     pack.CUES.jar({}, {}, 0, { hive, seed, vseed: 1 }, () => 0.5);
     return calls.find((c) => c.name === 'body').p.f0;
   };
-  for (const hive of ['clover', 'apple', 'wildflowers', 'queen']) {
+  for (const hive of ['clover', 'apple', 'wildflowers', 'queen', 'sunflower']) {
     for (const seed of [...SEEDS, 0xffffffff]) {
       const want = 1400 + 1600 * lightness(hive, seed);
       assert.ok(near(clink(hive, seed), want, 0.5), `${hive} ${seed}: ${clink(hive, seed)} Hz, want ${want}`);

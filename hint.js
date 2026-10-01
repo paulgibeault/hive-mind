@@ -18,9 +18,14 @@
  * With no last tap (a fresh frame, or a run just resumed — the last tap is
  * never saved), there is nowhere to be near, so step 2 is skipped and the
  * smallest proof decides.
+ *
+ * Scouts (#12): a Scout's number counts its whole range (two steps out), so
+ * "capped cells a clue touches" means the capped cells it counts, and a proof
+ * with a Scout in it always gets the generic line — the specific sentences
+ * talk about neighbours, which is only true of a plain number.
  */
 
-import { nbrsOf, provenNow, minimalProof, SAFE, GUARD, QUEEN, NONE, MARK_G, MARK_Q } from './core.js';
+import { nbrsOf, ring2Of, isScout, provenNow, minimalProof, SAFE, GUARD, QUEEN, NONE, MARK_G, MARK_Q } from './core.js';
 
 /** What a hint costs on the clock (ms). It also costs the Pure seal. */
 export const PENALTY_MS = 10_000;
@@ -42,7 +47,9 @@ export function hexDistance(cols, a, b) {
   return Math.max(Math.abs(A[0] - B[0]), Math.abs(A[1] - B[1]), Math.abs(A[2] - B[2]));
 }
 
-const capped = (s, nb, c) => nb[c].filter((j) => !s.open[j]);
+/* The cells clue c counts: its neighbours, or a Scout's range. */
+const scope = (s, nb, c) => (isScout(s, c) ? ring2Of(s.cols, s.rows)[c] : nb[c]);
+const capped = (s, nb, c) => scope(s, nb, c).filter((j) => !s.open[j]);
 
 /**
  * The hint for state s, measured from the last tapped cell `last` (-1 for
@@ -92,7 +99,7 @@ function implied(s, nb, clues, target) {
   const keep = new Set(clues);
   const masked = { ...s, broken: s.broken.map((b, i) => (b || (s.open[i] && !keep.has(i)) ? 1 : 0)) };
   const p = provenNow(masked);
-  const near = new Set(clues.flatMap((c) => nb[c]));
+  const near = new Set(clues.flatMap((c) => scope(s, nb, c)));
   return [...p.guard].filter(([i]) => i !== target && near.has(i))
     .map(([i, value]) => ({ i, value })).sort((a, b) => a.i - b.i);
 }
@@ -101,16 +108,21 @@ function implied(s, nb, clues, target) {
  * tap (or the lowest such cell, with none). */
 function fallback(s, nb, last) {
   const isClue = (c) => s.open[c] && !s.broken[c] && s.cells[c] === 0;
-  const frontier = [];
-  for (let i = 0; i < s.open.length; i++) if (!s.open[i] && nb[i].some(isClue)) frontier.push(i);
+  // every capped cell some clue counts, and the clues counting it
+  const near = new Map();
+  for (let c = 0; c < s.open.length; c++) {
+    if (!isClue(c)) continue;
+    for (const h of capped(s, nb, c)) { if (!near.has(h)) near.set(h, []); near.get(h).push(c); }
+  }
+  const frontier = [...near.keys()].sort((a, b) => a - b);
   if (!frontier.length) return null;
   const far = (i) => (last >= 0 ? hexDistance(s.cols, last, i) : 0);
   const from = frontier.reduce((a, b) => (far(b) < far(a) ? b : a));
   // the group: clues joined through the capped cells they share
-  const got = new Set(nb[from].filter(isClue)), stack = [...got];
+  const got = new Set(near.get(from)), stack = [...got];
   while (stack.length) {
     for (const h of capped(s, nb, stack.pop())) {
-      for (const d of nb[h]) if (isClue(d) && !got.has(d)) { got.add(d); stack.push(d); }
+      for (const d of near.get(h)) if (!got.has(d)) { got.add(d); stack.push(d); }
     }
   }
   const pick = { kind: 'fallback', clues: [...got].sort((a, b) => a - b) };
@@ -155,7 +167,7 @@ export function whyLine(s, pick) {
  * prove cells safe on its own, but such a clue is a zero, which floods: it
  * never has a capped neighbour to explain.) */
 function fullClue(s, nb, c, value) {
-  if (s.broken[c]) return null;
+  if (s.broken[c] || isScout(s, c)) return null;
   const l = label(s, c);
   if (!l || l.kind !== value || l.n !== capped(s, nb, c).length) return null;
   if (l.n === 1) return `This ${l.text} has just one capped neighbour, so a ${what(value)} sleeps there.`;
@@ -167,7 +179,7 @@ function fullClue(s, nb, c, value) {
  * and fills it, so the other 1's remaining capped cells (the lit one among
  * them) are safe. */
 function twoOnes(s, nb, clues, target) {
-  if (clues.some((c) => s.broken[c])) return null;
+  if (clues.some((c) => s.broken[c] || isScout(s, c))) return null;
   const ls = clues.map((c) => label(s, c));
   if (ls.some((l) => !l || l.n !== 1) || ls[0].kind !== ls[1].kind) return null;
   for (const [a, b] of [[0, 1], [1, 0]]) {

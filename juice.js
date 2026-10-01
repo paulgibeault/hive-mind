@@ -7,6 +7,7 @@
  */
 
 import { centre } from './hex.js';
+import { isScout, ring2Of } from './core.js';
 
 export const RING_MS = 28;        // a flood opens one ring per this
 export const SWEEP_MS = 30;       // a sweep's light moves one neighbour per this
@@ -48,24 +49,30 @@ export function clockwise(i, nbrs, cols) {
   return [...nbrs[i]].sort((a, b) => angle(a) - angle(b));
 }
 
-/** Does an open cell show a number? (Broken comb and zeros don't.) */
-export const showsNumber = (s, i) => !s.broken[i] && (s.shown[i] > 0 || s.shownH[i] > 0);
+/** Does an open cell show a number? (Broken comb and plain zeros don't; a
+ *  Scout always does, 0 included — it never floods, so its 0 is news.) */
+export const showsNumber = (s, i) => !s.broken[i] && (isScout(s, i) || s.shown[i] > 0 || s.shownH[i] > 0);
 
 /**
- * A finished number: no neighbour is still capped and unmarked. It reads only
- * the open cells and the player's own marks — a wrong mark finishes it too.
+ * A finished number: no cell it counts is still capped and unmarked — its
+ * neighbours, or a Scout's whole range (#12), so a Scout dims exactly when
+ * there is nothing left in its range for it to tell. It reads only the open
+ * cells and the player's own marks — a wrong mark finishes it too.
  */
 export function finished(s, nbrs, i) {
-  for (const j of nbrs[i]) if (!s.open[j] && !s.mark[j]) return false;
+  const over = isScout(s, i) ? ring2Of(s.cols, s.rows)[i] : nbrs[i];
+  for (const j of over) if (!s.open[j] && !s.mark[j]) return false;
   return true;
 }
 
 /**
  * A tap on this open number was a sweep that couldn't fire: it still has
  * unmarked capped neighbours, so the marks round it must not add up. (A tap
- * on a zero, broken comb or a finished number isn't refused, just idle.)
+ * on a zero, broken comb or a finished number isn't refused, just idle; nor
+ * is a Scout, which is never swept — its tap is idle too, so the shake keeps
+ * meaning "your marks don't add up".)
  */
-export const refused = (s, nbrs, i) => !!s.open[i] && showsNumber(s, i) && !finished(s, nbrs, i);
+export const refused = (s, nbrs, i) => !!s.open[i] && !isScout(s, i) && showsNumber(s, i) && !finished(s, nbrs, i);
 
 // ── easing, over t in 0..1 ──────────────────────────────────────────────
 export const clamp01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);

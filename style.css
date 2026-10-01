@@ -110,6 +110,9 @@ button, input { font: inherit; color: inherit; }
   overflow-y: auto;
 }
 .sheet.menu { justify-content: flex-start; }
+/* a menu taller than the screen scrolls; its rows never squash to fit (the
+   2 × 2 hive grid, #12, made it taller than a 390 × 844 phone) */
+.sheet.menu > * { flex-shrink: 0; }
 .sheet.small { justify-content: center; }
 .sheet.small::before, .sheet.menu::before, .sheet.pantry::before {
   content: "";
@@ -140,10 +143,11 @@ h2 { font-size: 30px; }
 .masthead .lede { margin: 0; font-size: 15px; }
 
 .label { display: block; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 8px; }
-.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+/* four hives (#12): two by two, so every name fits one line at 390 px */
+.seg { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .seg button {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
-  padding: 12px 6px 10px;
+  padding: 10px 6px 8px;
   border-radius: 14px;
   border: 1px solid var(--line);
   background: var(--bg-2);
@@ -156,6 +160,9 @@ h2 { font-size: 30px; }
 .seg .marks i { width: 12px; height: 12px; display: block; background: var(--guard); clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
 .seg .marks i.q { background: var(--queen); }
 .seg .marks i.b { background: linear-gradient(135deg, var(--honey) 45%, #2a1d10 45% 55%, var(--honey) 55%); }
+/* a Scout: dark comb inside a double honey rim */
+.seg .marks i.s { background: radial-gradient(circle, #3b2b19 0 30%, var(--honey) 30% 44%, #3b2b19 44% 58%, var(--honey) 58%); }
+
 .hive-note { margin: 8px 2px 0; color: var(--ink-dim); font-size: 14px; line-height: 1.4; }
 
 .primary, .ghost, .strip {
@@ -190,6 +197,8 @@ h2 { font-size: 30px; }
 .how b { color: var(--ink); }
 .k-g { color: var(--guard); font-weight: 700; }
 .k-q { color: var(--queen); font-weight: 700; }
+/* a Scout's double rim, in words (#12) */
+.k-s { color: var(--ink); font-weight: 500; padding: 0 3px; border-radius: 4px; box-shadow: 0 0 0 1px var(--honey), 0 0 0 2px #3b2b19, 0 0 0 3px var(--honey); }
 .code-form { display: flex; gap: 8px; margin-top: 10px; }
 .code-form input {
   flex: 1; min-width: 0;

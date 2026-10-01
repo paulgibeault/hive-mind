@@ -63,6 +63,55 @@ cleared with its time and seal, and how long until the next frame.
 `Arcade.stats('weekly')` keeps each week's best clear. Densities were measured
 over 1,000 seeds (median 8 tries, max 89, about 1.5 ms a frame on a laptop).
 
+### Sunflower Field (`sunflower`, #12): Scouts
+
+| Hive | Frame | Hazards | The idea |
+|---|---|---|---|
+| Sunflower Field (`sunflower`) | 9 × 18 | 32 guards, 8 Scouts | some comb is a **Scout**: its number counts the guards **two steps out** (its *range*, up to 18 cells), not just the six neighbours |
+
+- A Scout is a safe cell. Capped, it looks like any cap (nothing tells it
+  apart before the tap); uncapped, it has a **double rim** and its number in a
+  lighter weight, a 0 included. It never floods, and it **can't be swept**:
+  a sweep is a neighbour gesture, and a Scout's number is about its range.
+  Its tap is idle (no shake: the shake means "your marks don't add up").
+- `core.js` keeps `scout[]` per frame (saves from before #12 have none: no
+  Scouts), `ring2Of()` (cached like `nbrsOf`), and `clueOf()` returns
+  `{ guards, queens, over }` for a Scout. Scouts are placed after everything
+  else is drawn, so no other hive's frames moved. Scouts go only in one-kind
+  hives: their reading is one number.
+- The solver reads a clue's `over` (default: the neighbours) wherever it
+  read the neighbours: `groups()`, `enumerate()`, the group key, and
+  `minimalProof`'s clue adjacency and counterexample search. Wide clues join
+  only once the plain ones are stuck (they merge groups, and a group past the
+  node budget teaches nothing), and plain clues are walked first inside a
+  group. With no Scout on the board the solver runs exactly as before.
+- Densities were measured over seeds 1–1000: 32 guards with 8 Scouts runs at
+  median 5 tries (max 40), under 1 ms a frame; about 4 frames in 5 can't be
+  finished with their Scouts read as blank. `provenNow` on mid-game frames:
+  p95 0.43 ms against Apple Orchard's 0.31 ms on a laptop
+  (`tools/bench-proof.mjs`), inside #2's budget, so Scouts aren't capped.
+- Consumers that assumed six neighbours: the hint's and the sting lesson's
+  specific sentences are for plain numbers only (a proof with a Scout gets
+  the generic line); "capped cells a clue touches" (hint ranking, the
+  fallback's group) counts a Scout's range; a Scout's number dims as
+  finished only once its whole range is open or marked (it reads only open
+  cells and marks, like a plain one). Sound hears nothing new (`kind` is
+  unchanged); Sunflower Field has its own instrument, a sun-warmed steel
+  tongue drum, major pentatonic on G.
+- Its honey is sunflower honey, golden and bright (`#f7c548 → #eaa92b`, a
+  small seeded wobble like Clover's). Records `time-sunflower`,
+  `pure-time-sunflower`; codes `SU-`.
+- **The selector** lays the four hives out two by two so every name fits on
+  one line at 390 px. `prefs.hive` is an index into the pickable hives;
+  Sunflower Field is appended to `HIVES` after the Queen's Frame (hidden), so
+  it is pickable index 3 and the first three keep 0–2. The pantry shows the
+  pickable hives' shelves in selector order, then the Queen's Frame.
+- **The daily rotation** (`core.dailyHive(date)`): a hive with `dailyFrom`
+  joins the rotation on that date. Before Sunflower Field's (2026-11-01) the
+  rotation is exactly the old one (day number mod 3), so no daily already
+  dealt changes hive, including today's in the middle of the day of a deploy.
+  From that date it leads, then the four take turns.
+
 ## Fairness: how "no guessing" is kept
 
 `solver.js` is the promise. Every hidden cell carries a **domain**: the set of
@@ -102,7 +151,8 @@ again until nothing more follows.
    the classic. There is no separate penalty for a wrong-kind mark: the sweep
    is where it costs you.
 5. **The Daily Frame** rolls at local midnight (`Arcade.daily`), and the hive
-   rotates by day number, so each hive comes round every third day. The best
+   rotates by day number, so each hive comes round every third day (every
+   fourth from 2026-11-01, when Sunflower Field joins; #12). The best
    clear per date goes in `Arcade.stats('daily')`, and the menu shows a
    streak.
 6. **Records**: `time-<hive>`, the fastest clear per hive (`duration-ms`,

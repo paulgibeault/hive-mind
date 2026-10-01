@@ -2,7 +2,8 @@
  *
  * A frame is a rectangle of pointy-top hexagons in "odd-r" offset layout:
  * odd rows sit half a cell to the right. Cells are numbered row-major,
- * i = y * cols + x. Every cell has up to six neighbours.
+ * i = y * cols + x. Every cell has up to six neighbours, and up to eighteen
+ * cells within two steps (a Scout's range, #12).
  */
 
 const EVEN = [[-1, -1], [0, -1], [-1, 0], [1, 0], [-1, 1], [0, 1]];
@@ -23,6 +24,17 @@ export function neighbours(cols, rows) {
     }
   }
   return out;
+}
+
+/** Every cell's RANGE: the cells at hex distance 1 or 2 (up to 18), ascending.
+ *  The neighbours and their neighbours, less the cell itself. */
+export function ring2(cols, rows) {
+  const nb = neighbours(cols, rows);
+  return nb.map((list, i) => {
+    const out = new Set(list);
+    for (const j of list) for (const k of nb[j]) if (k !== i) out.add(k);
+    return [...out].sort((a, b) => a - b);
+  });
 }
 
 /** Centre of cell i for circumradius r, with the frame's top-left at 0,0. */

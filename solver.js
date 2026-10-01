@@ -7,8 +7,17 @@
  * Every hidden cell carries a DOMAIN: a bitmask of what it might still be —
  * SAFE, GUARD, QUEEN (a queen's guard). A clue is a revealed cell's reading
  * of its neighbours, { guards: a, queens: b }: exactly a guards and b queen's
- * guards. Broken comb has no clue at all (clueAt → null). The solver narrows
- * domains until nothing more follows. It works a
+ * guards. Broken comb has no clue at all (clueAt → null).
+ *
+ * A clue counts its SCOPE: the six neighbours, unless it names its own cells
+ * with `over` — { guards, queens, over: number[] }. A Scout (#12) does: it
+ * counts every cell within two steps. Such WIDE clues join the reasoning only
+ * once the plain ones are stuck (they merge groups aggressively, and a group
+ * too big for the budget teaches nothing), and inside a group the plain
+ * clues are walked first so they prune before a wide one closes. A frame
+ * with no wide clue is solved exactly as it was before Scouts existed.
+ *
+ * The solver narrows domains until nothing more follows. It works a
  * connected group of hidden cells at a time and enumerates every assignment
  * consistent with the clues touching it; whatever holds in all of them is
  * known. Enumeration is capped by a node budget (not a clock), so the answer
@@ -33,6 +42,9 @@ export const PROOF_BUDGET = 200000;
 // back to the whole group
 export const PROOF_MAX = 4;
 
+/* The cells a clue counts: its `over`, or the neighbours of its cell. */
+const scopeOf = (nbrs, clue, c) => clue.over || nbrs[c];
+
 const kindOf = (bit) => (bit === GUARD ? 1 : bit === QUEEN ? 2 : 0);
 const single = (m) => m === SAFE || m === GUARD || m === QUEEN;
 
@@ -40,7 +52,9 @@ const single = (m) => m === SAFE || m === GUARD || m === QUEEN;
  * Deduce as far as possible.
  *   nbrs      neighbour lists
  *   dom       Uint8Array of domains — narrowed IN PLACE
- *   clueAt(i) → the clue a revealed cell shows, or null for none
+ *   clueAt(i) → the clue a revealed cell shows, or null for none:
+ *             { guards, queens } over nbrs[i], or { guards, queens, over }
+ *             over the cells `over` names (a Scout's range)
  *   open(i)   called for each cell proven SAFE. The generator's open()
  *             uncaps it (and floods), setting opened[] so new clues join the
  *             reasoning. An open() that only records — or none at all —
@@ -60,23 +74,31 @@ export function solve(nbrs, dom, clueAt, open = () => {}, opened) {
   // neighbours — and skipped until that changes. Same answers, fewer nodes:
   // it matters most for a group too big for the budget, which would
   // otherwise be re-enumerated in full after every unrelated step.
+  //
+  // Plain clues first; only when they teach nothing more do the wide ones
+  // (Scouts) join in, and any progress goes back to plain clues alone. With
+  // no wide clue on the board the second pass never runs.
   const barren = new Set();
   let progress = true;
   while (progress) {
     progress = false;
-    for (const group of groups(nbrs, dom, clueAt, opened)) {
-      const key = position(group, nbrs, dom, opened);
-      if (barren.has(key)) continue;
-      const seen = enumerate(group, nbrs, dom, clueAt, opened);
-      if (!seen) { barren.add(key); continue; }
-      const learnt = [];
-      for (let k = 0; k < group.cells.length; k++) {
-        const i = group.cells[k];
-        if (seen[k] !== dom[i]) { dom[i] = seen[k]; learnt.push(i); }
+    for (const reach of [false, true]) {
+      const { list, skipped } = groups(nbrs, dom, clueAt, opened, reach);
+      for (const group of list) {
+        const key = position(group, dom, opened);
+        if (barren.has(key)) continue;
+        const seen = enumerate(group, dom, clueAt, opened);
+        if (!seen) { barren.add(key); continue; }
+        const learnt = [];
+        for (let k = 0; k < group.cells.length; k++) {
+          const i = group.cells[k];
+          if (seen[k] !== dom[i]) { dom[i] = seen[k]; learnt.push(i); }
+        }
+        if (!learnt.length) barren.add(key);
+        for (const i of learnt) if (dom[i] === SAFE && !opened[i]) open(i);
+        if (learnt.length) { progress = true; break; }
       }
-      if (!learnt.length) barren.add(key);
-      for (const i of learnt) if (dom[i] === SAFE && !opened[i]) open(i);
-      if (learnt.length) { progress = true; break; }
+      if (progress || !skipped) break;
     }
   }
   for (let i = 0; i < dom.length; i++) if (dom[i] & SAFE && !opened[i]) return false;
@@ -122,12 +144,13 @@ export function provenNow(nbrs, opened, clueAt, kinds) {
  * "Alone proves" means: with only those clues on screen (every other cell
  * hidden and unknown), every assignment consistent with them gives i the same
  * value. A minimal proof is always CONNECTED to i — each clue reaches i
- * through clues that share hidden neighbours — since a clue in a separate
- * component constrains nothing i depends on. So subsets are grown outward
- * from the clues touching i, size 1..PROOF_MAX, in a fixed order (by size,
- * then lexicographically by cell index); the first that proves i wins. That
- * covers every proof within 3 rings of i and also chains that reach further
- * (a 3-clue chain can end 5 rings out). If none of size ≤ PROOF_MAX proves it,
+ * through clues that share hidden cells in their scopes — since a clue in a
+ * separate component constrains nothing i depends on. So subsets are grown
+ * outward from the clues whose scope holds i (a Scout's reaches two steps),
+ * size 1..PROOF_MAX, in a fixed order (by size, then lexicographically by
+ * cell index); the first that proves i wins. With plain clues that covers
+ * every proof within 3 rings of i and also chains that reach further (a
+ * 3-clue chain can end 5 rings out). If none of size ≤ PROOF_MAX proves it,
  * or PROOF_BUDGET runs out, the answer is every clue of i's group: all
  * revealed clues connected to i, which prove it whenever anything does.
  */
@@ -137,21 +160,36 @@ export function minimalProof(nbrs, opened, clueAt, kinds, i, known) {
   const value = now.safe.has(i) ? SAFE : now.guard.get(i);
   if (!value) return null;
 
-  // a usable clue: uncapped, has a clue, and still touches a hidden cell
-  const isClue = (c) => opened[c] && clueAt(c) !== null && nbrs[c].some((j) => !opened[j]);
-  const cluesNear = (h) => nbrs[h].filter(isClue);          // clue cells next to hidden h
+  // a usable clue: uncapped, has a clue, and its scope still holds a hidden cell
+  const scope = new Map();                                   // usable clue cell → its scope
+  for (let c = 0; c < nbrs.length; c++) {
+    if (!opened[c]) continue;
+    const clue = clueAt(c);
+    if (clue === null) continue;
+    const over = scopeOf(nbrs, clue, c);
+    if (over.some((j) => !opened[j])) scope.set(c, over);
+  }
+  const near = new Map();                                    // hidden h → the clues counting it
+  for (const [c, over] of scope) {
+    for (const h of over) {
+      if (opened[h]) continue;
+      if (!near.has(h)) near.set(h, []);
+      near.get(h).push(c);
+    }
+  }
+  const cluesNear = (h) => near.get(h) || [];
   const adj = new Map();                                     // clue → clues sharing a hidden cell
   const adjOf = (c) => {
     if (!adj.has(c)) {
       const out = new Set();
-      for (const h of nbrs[c]) if (!opened[h]) for (const d of cluesNear(h)) if (d !== c) out.add(d);
+      for (const h of scope.get(c)) if (!opened[h]) for (const d of cluesNear(h)) if (d !== c) out.add(d);
       adj.set(c, [...out].sort((a, b) => a - b));
     }
     return adj.get(c);
   };
 
   // i's group: every clue connected to i
-  const roots = cluesNear(i).sort((a, b) => a - b);
+  const roots = [...cluesNear(i)].sort((a, b) => a - b);
   const groupClues = () => {
     const got = new Set(roots), stack = [...roots];
     while (stack.length) for (const d of adjOf(stack.pop())) if (!got.has(d)) { got.add(d); stack.push(d); }
@@ -163,7 +201,7 @@ export function minimalProof(nbrs, opened, clueAt, kinds, i, known) {
   for (let size = 1; size <= PROOF_MAX && level.length; size++) {
     for (const set of level) {
       if (--budget.left < 0) return groupClues();
-      const r = counterexample(nbrs, opened, clueAt, kinds, i, value, set, budget);
+      const r = counterexample(scope, opened, clueAt, kinds, i, value, set, budget);
       if (r === null) return groupClues();                   // budget ran out mid-search
       if (!r) return { value, clues: set };
     }
@@ -196,11 +234,11 @@ const lexical = (a, b) => {
 /* Is there an assignment of the hidden cells around `clueCells` that fits
  * every one of those clues and gives i something other than `value`?
  * true/false, or null if the budget ran out. */
-function counterexample(nbrs, opened, clueAt, kinds, i, value, clueCells, budget) {
+function counterexample(scope, opened, clueAt, kinds, i, value, clueCells, budget) {
   const order = [i];
   const at = new Map([[i, 0]]);
-  for (const c of clueCells) for (const j of nbrs[c]) if (!opened[j] && !at.has(j)) { at.set(j, order.length); order.push(j); }
-  const qs = clueCells.map((c) => ({ clue: clueAt(c), slots: nbrs[c].filter((j) => !opened[j]).map((j) => at.get(j)) }));
+  for (const c of clueCells) for (const j of scope.get(c)) if (!opened[j] && !at.has(j)) { at.set(j, order.length); order.push(j); }
+  const qs = clueCells.map((c) => ({ clue: clueAt(c), slots: scope.get(c).filter((j) => !opened[j]).map((j) => at.get(j)) }));
   const cluesOf = order.map(() => []);
   qs.forEach((q, qi) => q.slots.forEach((s) => cluesOf[s].push(qi)));
   const cw = qs.map(() => 0), ch = qs.map(() => 0), left = qs.map((q) => q.slots.length);
@@ -227,34 +265,42 @@ function counterexample(nbrs, opened, clueAt, kinds, i, value, clueCells, budget
 }
 
 /* Everything enumerate() reads for a group, as a key: its clues in order and,
- * for each, whether each neighbour is open and what it might be. (The group's
- * cells are exactly the hidden, undecided ones among those neighbours.) */
-function position(group, nbrs, dom, opened) {
+ * for each, whether each cell of its scope is open and what it might be. (The
+ * group's cells are exactly the hidden, undecided ones among those.) */
+function position(group, dom, opened) {
   let key = '';
-  for (const c of group.clues) {
-    key += c + ':';
-    for (const j of nbrs[c]) key += opened[j] ? 'o' : dom[j];
+  for (let k = 0; k < group.clues.length; k++) {
+    key += group.clues[k] + ':';
+    for (const j of group.scopes[k]) key += opened[j] ? 'o' : dom[j];
     key += ',';
   }
   return key;
 }
 
-/* Hidden, undecided cells next to a clue, split into groups that share no
- * clue. Each group comes with the clues that touch it. */
-function groups(nbrs, dom, clueAt, opened) {
+/* Hidden, undecided cells in a clue's scope, split into groups that share no
+ * clue. Each group comes with the clues that count it, and their scopes.
+ * Without `reach`, wide clues (Scouts) are left out and counted in `skipped`.
+ * Within a group holding a wide clue, the plain clues come first. */
+function groups(nbrs, dom, clueAt, opened, reach) {
   const n = dom.length;
-  const clueCells = [];
+  const clueCells = [], scopes = [], wide = [];
+  let skipped = 0;
   for (let i = 0; i < n; i++) {
-    if (!opened[i] || !clueAt(i)) continue;
-    if (nbrs[i].some((j) => !opened[j] && !single(dom[j]))) clueCells.push(i);
+    if (!opened[i]) continue;
+    const clue = clueAt(i);
+    if (!clue) continue;
+    const over = scopeOf(nbrs, clue, i);
+    if (!over.some((j) => !opened[j] && !single(dom[j]))) continue;
+    if (clue.over && !reach) { skipped++; continue; }
+    clueCells.push(i); scopes.push(over); wide.push(!!clue.over);
   }
   const owner = new Int32Array(n).fill(-1);          // hidden cell → group
   const out = [];
-  for (const c of clueCells) {
-    const hidden = nbrs[c].filter((j) => !opened[j] && !single(dom[j]));
+  clueCells.forEach((c, k) => {
+    const hidden = scopes[k].filter((j) => !opened[j] && !single(dom[j]));
     const joined = new Set(hidden.map((j) => owner[j]).filter((g) => g >= 0));
     let g;
-    if (joined.size === 0) { g = out.length; out.push({ cells: [], clues: [], alive: true }); }
+    if (joined.size === 0) { g = out.length; out.push({ cells: [], clues: [], scopes: [], wide: [], alive: true }); }
     else {
       const ids = [...joined].sort((a, b) => a - b);
       g = ids[0];
@@ -262,23 +308,34 @@ function groups(nbrs, dom, clueAt, opened) {
         for (const j of out[other].cells) owner[j] = g;
         out[g].cells.push(...out[other].cells);
         out[g].clues.push(...out[other].clues);
-        out[other] = { cells: [], clues: [], alive: false };
+        out[g].scopes.push(...out[other].scopes);
+        out[g].wide.push(...out[other].wide);
+        out[other] = { cells: [], clues: [], scopes: [], wide: [], alive: false };
       }
     }
     for (const j of hidden) if (owner[j] < 0) { owner[j] = g; out[g].cells.push(j); }
     out[g].clues.push(c);
+    out[g].scopes.push(scopes[k]);
+    out[g].wide.push(wide[k]);
+  });
+  const list = out.filter((g) => g.alive);
+  for (const g of list) {
+    if (!g.wide.includes(true)) continue;
+    const ord = g.clues.map((_, k) => k).sort((a, b) => g.wide[a] - g.wide[b] || a - b);
+    g.clues = ord.map((k) => g.clues[k]);
+    g.scopes = ord.map((k) => g.scopes[k]);
   }
-  return out.filter((g) => g.alive);
+  return { list, skipped };
 }
 
 /* Every consistent assignment of one group. Returns, per cell, the OR of the
  * values it took — or null if the budget ran out (then nothing is claimed). */
-function enumerate(group, nbrs, dom, clueAt, opened) {
+function enumerate(group, dom, clueAt, opened) {
   // order cells so each clue closes as early as possible: walk clue by clue
   const order = [];
   const at = new Map();
-  for (const c of group.clues) {
-    for (const j of nbrs[c]) {
+  for (const over of group.scopes) {
+    for (const j of over) {
       if (!opened[j] && !single(dom[j]) && !at.has(j) && group.cells.includes(j)) {
         at.set(j, order.length); order.push(j);
       }
@@ -288,11 +345,11 @@ function enumerate(group, nbrs, dom, clueAt, opened) {
   const idx = cells.map((j) => at.get(j));
 
   // per clue: fixed contribution from decided neighbours + its open slots
-  const clues = group.clues.map((c) => {
+  const clues = group.clues.map((c, k) => {
     const clue = clueAt(c);
     let w = 0, h = 0;
     const slots = [];
-    for (const j of nbrs[c]) {
+    for (const j of group.scopes[k]) {
       if (opened[j]) continue;
       if (single(dom[j])) { const k = kindOf(dom[j]); if (k === 1) w++; else if (k === 2) h++; }
       else slots.push(at.get(j));
