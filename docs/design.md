@@ -19,31 +19,32 @@ mode.
 | Classic | Here |
 |---|---|
 | board | a **frame** of honeycomb, pointy-top hexes in odd-r offset rows |
-| mine | a **wasp** (and, in the Orchard, a **hornet**) |
+| mine | a sleeping **guard** bee (and, in Apple Orchard, the **queen's guard**) |
 | hidden cell | a honey-gold **cap**; uncapped comb is dark and holds its number |
-| flag | a **mark**: an amber disc (wasp) or a red square (hornet). The two differ in shape as well as colour |
+| flag | a **mark**: an amber disc (guard) or a red square (queen's guard). The two differ in shape as well as colour |
 | first-click safety | the **opening**: every frame ships with a zero near the middle already uncapped |
 | chord | **sweep**: tap an uncapped number whose marks are placed to uncap the rest |
 | lose | **stung** |
+| win | **honey taken**; the guards sleep on, sealed under dark wax |
 
 ## Hives: one idea each
 
 | Hive | Frame | Hazards | The idea |
 |---|---|---|---|
-| Meadow | 8 × 15 | 23 wasps | hexes: six neighbours, not eight |
-| Orchard | 9 × 18 | 18 wasps + 13 hornets | two kinds, each counted separately. A cell reads e.g. amber **2** and a red boxed **1**. You mark the kind, and a sweep only trusts marks of the right kind |
-| Wild | 9 × 18 | 31 wasps, 20 cracked cells | a **cracked** cell's number is off by exactly one, up or down. The crack is drawn, so the lie is fair. A crack never reads 0 (that could only mean 1), and cracked cells can't be swept |
+| Clover Field (`clover`) | 8 × 15 | 23 guards | hexes: six neighbours, not eight |
+| Apple Orchard (`apple`) | 9 × 18 | 18 guards + 13 queen's guards | two kinds, each counted separately. A cell reads e.g. amber **2** and a red boxed **1**. You mark the kind, and a sweep only trusts marks of the right kind |
+| Wildflowers (`wildflowers`) | 9 × 18 | 31 guards, 6 broken cells | some comb is **broken**: safe, but it tells you nothing. An uncapped broken cell shows its break and no number, never floods, and can't be swept. Capped, it looks like any other cap |
 
 Sizes fill a portrait phone: the frame is width-bound at 8–9 cells across,
 which keeps each cell about 40 px, a comfortable tap target. Densities (about
 19%) are **first guesses to tune by playtest**. Stacking the ideas, such as a
-cracked Orchard, is an easy later hive: the solver already handles both clue
-types together.
+broken Apple Orchard, is an easy later hive: broken comb is just a missing
+clue, which the solver already understands.
 
 ## Fairness: how "no guessing" is kept
 
 `solver.js` is the promise. Every hidden cell carries a **domain**: the set of
-things it might still be, out of {safe, wasp, hornet}. The solver groups the
+things it might still be, out of {safe, guard, queen's guard}. The solver groups the
 hidden cells that share clues and enumerates every assignment consistent with
 those clues. Whatever holds in every assignment is known. A proven-safe cell
 is uncapped, flood included, exactly as the player would, and the loop runs
@@ -53,8 +54,10 @@ again until nothing more follows.
   therefore a property of the frame, and every device reaches the same
   verdict.
 - `generate(hive, seed)` draws candidate frames from one seeded stream and
-  keeps the first one the solver can finish. Today that takes about 3–10
-  tries and 1–2 ms. A frame is a pure function of (hive, seed).
+  keeps the first one the solver can finish. Over seeds 1–1000 the median
+  is 3 tries for Clover Field, 2 for Apple Orchard and 10 for Wildflowers
+  (max 25, 21 and 137 of the 4000 allowed), well under 2 ms a frame. A test
+  holds Wildflowers to that budget. A frame is a pure function of (hive, seed).
 - The solver is deliberately **stronger than a casual player**: it does full
   local enumeration, but ignores the global hazard count. "Solvable" means a
   careful player can always find the next move, not that it is obvious.
@@ -83,14 +86,50 @@ again until nothing more follows.
 6. **Records**: `time-<hive>`, the fastest clear per hive (`duration-ms`,
    lower is better), which the launcher's Records sheet renders. Played/won
    counts go in `Arcade.stats('frames')`.
-7. **Frame codes** (`OR-0000ABC`): the hive plus the seed in base 36, shown on
+7. **Frame codes** (`AP-0000ABC`): the hive plus the seed in base 36, shown on
    the rail and on the win sheet, and typed into the menu. This is racing
    before the network exists: say the code aloud and both start.
+
+## Decisions — 2026-09-28 (design review)
+
+1. **Hive names.** Meadow → **Clover Field** (`clover`), Orchard → **Apple
+   Orchard** (`apple`), Wild → **Wildflowers** (`wildflowers`). Codes are
+   `CL-`, `AP-`, `WI-`. Old `ME-` and `OR-` codes still parse, and open the
+   same frame: the hive id isn't in the RNG. `hiveById()` maps old ids to
+   new ones (core.js `OLD_IDS`, the one place they're named), so an old
+   Orchard run never loads as Clover Field.
+2. **No wasps.** The hazard is a **sleeping guard bee**: round, fuzzy, eyes
+   shut. Apple Orchard's second kind is the **queen's guard**, the same bee
+   in red with a small crown. Tagline: *"Uncap every safe cell. Leave the
+   guards asleep."* "Stung" stays. Marks keep their shapes. On a win the
+   guards stay sealed under dark wax; on a loss the bees are shown. A repo
+   gate keeps "wasp" and "hornet" out of everything that ships.
+3. **No lying cells.** Wildflowers' cracked cells (a number off by one)
+   became **broken comb**: safe, with no number at all. `clueOf()` returns
+   null for it, which the solver already reads as "no clue here", so the
+   solver's cracked-clue branch is gone. The "never show a cracked 0" rule
+   went with it.
+4. **Six broken cells, not twenty.** A blank tells you less than a crack
+   did, so it costs the generator more. Measured over seeds 1–1000 at 31
+   guards: 12 broken → median 60 tries (max 772); 8 → 17; 6 → **10** (max
+   137); 5 → 8. Six is the most that keeps the median at 10. If Wildflowers
+   wants more broken comb, fewer guards buys it: 26 guards with 12 broken
+   runs at median 7 (max 88). A playtest call.
+5. **Saves move to v2.** On boot, and after a save import, `migrate.js`
+   (pure, tested) brings v1 data across: the run's hive and field names,
+   `time-<id>` records, and the hive keys in `Arcade.stats('frames')` and
+   `Arcade.stats('daily')`, keeping the better entry where old and new both
+   exist. It is idempotent. A v1 Wild run is kept only if its frame is still
+   solvable with its cracks read as broken comb; otherwise it is dropped
+   rather than resumed into a guess. `prefs.hive` is an index and doesn't
+   move.
+6. **Old `WI-` codes open different frames now.** Broken comb changed how
+   Wildflowers frames are drawn from a seed. Accepted before 1.0.
 
 ## Controls
 
 Tap uncaps, or sweeps a number. Long-press (380 ms) or right-click marks,
-cycling none → wasp (→ hornet in the Orchard) → none. The flag button on the
+cycling none → guard (→ queen's guard in Apple Orchard) → none. The flag button on the
 rail makes taps mark, for anyone who finds long-press awkward. A press that
 drifts more than 12 px is dropped as a mis-touch. Keys: P / Esc to pause,
 M to switch mark mode.
@@ -147,12 +186,12 @@ fair. The frame travels as `{ cells }` (under 200 bytes). Fastest clear wins,
 and a sting costs time as in Race.
 
 ### Other owed work
-- **Playtest tuning**: densities per hive, long-press timing, whether Wild
-  needs fewer cracks.
+- **Playtest tuning**: densities per hive, long-press timing, and how much
+  broken comb Wildflowers wants (decision 4 above).
 - **Sound**: audition the pack on the launcher's soundpack workbench before
   deciding it's done (see the fleet sound-pack notes).
 - **Juice, optional**: a sting could collapse the frame into sand with the
   `Arcade.sim.sand` kernel. It's decoration and waits until the modes exist.
-- **A stacked hive** (cracked Orchard) and a **"hint" that explains** the
+- **A stacked hive** (broken Apple Orchard) and a **"hint" that explains** the
   next deduction, since the solver can already name the clues that prove a
   cell.

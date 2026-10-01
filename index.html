@@ -24,7 +24,7 @@
 
     <header class="rail" id="rail" hidden>
       <div class="rail-id">
-        <span class="mono eyebrow" id="hud-hive">Meadow</span>
+        <span class="mono eyebrow" id="hud-hive">Clover Field</span>
         <span class="mono code" id="hud-code"></span>
       </div>
       <div class="rail-count" id="hud-count" aria-live="polite"></div>
@@ -41,7 +41,7 @@
       <header class="masthead">
         <svg class="crest" viewBox="0 0 64 64" aria-hidden="true"><use href="#comb"/></svg>
         <h1>Hive Mind</h1>
-        <p class="lede">Uncap every safe cell. Leave the wasps asleep.</p>
+        <p class="lede">Uncap every safe cell. Leave the guards asleep.</p>
       </header>
 
       <button class="strip" id="continue" type="button" hidden>
@@ -65,19 +65,19 @@
       <details class="how">
         <summary>How it works</summary>
         <ul>
-          <li><b>Tap</b> a capped cell to uncap it. Its number counts the wasps in the six cells around it.</li>
-          <li><b>Long-press</b> (or right-click) to mark a cell you think hides a wasp. The flag button makes taps mark.</li>
+          <li><b>Tap</b> a capped cell to uncap it. Its number counts the sleeping guard bees in the six cells around it.</li>
+          <li><b>Long-press</b> (or right-click) to mark a cell you think hides a guard. The flag button makes taps mark.</li>
           <li>Tap a number whose marks are all placed to uncap the rest around it.</li>
           <li>Every frame can be finished <b>without guessing</b>. If you're stuck, there's something you haven't noticed yet.</li>
-          <li><b>Orchard</b> hides hornets too. Cells count each kind separately: <span class="k-w">amber</span> for wasps, <span class="k-h">red, boxed</span> for hornets. Long-press twice to mark a hornet.</li>
-          <li><b>Wild</b> comb is cracked in places. A cracked cell's number is <b>off by exactly one</b>, up or down.</li>
+          <li><b>Apple Orchard</b> hides the queen's guards too. Cells count each kind separately: <span class="k-g">amber</span> for guards, <span class="k-q">red, boxed</span> for the queen's guards. Long-press twice to mark a queen's guard.</li>
+          <li><b>Wildflowers</b> comb is broken in places. Broken comb is safe, but it <b>shows no number</b>: it tells you nothing about its neighbours.</li>
         </ul>
       </details>
 
       <details class="how" id="code-box">
         <summary>Play a frame code</summary>
         <form class="code-form" id="code-form">
-          <input id="code-in" class="mono" autocomplete="off" spellcheck="false" placeholder="ME-00A1B2C" aria-label="Frame code">
+          <input id="code-in" class="mono" autocomplete="off" spellcheck="false" placeholder="CL-00A1B2C" aria-label="Frame code">
           <button type="submit" class="ghost">Open</button>
         </form>
         <p class="hive-note">Same code, same frame, on any phone. Race a friend.</p>

@@ -7,8 +7,8 @@
   --honey: #f2b33d;
   --honey-deep: #c9801a;
   --wax: #3b2b19;
-  --wasp: #f5c542;
-  --hornet: #ec5b45;
+  --guard: #f5c542;
+  --queen: #ec5b45;
   --line: rgba(246, 234, 210, 0.14);
   --rail-h: 56px;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -68,8 +68,8 @@ button, input { font: inherit; color: inherit; }
 .code { font-size: 11px; color: var(--ink-dim); }
 .rail-count { flex: 1; display: flex; justify-content: center; gap: 12px; font-family: var(--mono); font-size: 17px; font-weight: 600; }
 .rail-count .n { display: inline-flex; align-items: center; gap: 5px; }
-.rail-count .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--wasp); box-shadow: inset 0 -3px 0 #2a1d10; }
-.rail-count .dot.h { background: var(--hornet); border-radius: 2px; }
+.rail-count .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--guard); box-shadow: inset 0 -3px 0 #2a1d10; }
+.rail-count .dot.q { background: var(--queen); border-radius: 2px; }
 .clock { font-size: 17px; min-width: 3.4em; text-align: right; }
 .tool {
   width: 40px; height: 40px;
@@ -139,9 +139,9 @@ h2 { font-size: 30px; }
 .seg button small { font-weight: 400; font-size: 12px; color: var(--ink-dim); }
 .seg button[aria-checked="true"] { border-color: var(--honey); box-shadow: inset 0 0 0 1px var(--honey); }
 .seg .marks { display: flex; gap: 3px; height: 16px; align-items: center; }
-.seg .marks i { width: 12px; height: 12px; display: block; background: var(--wasp); clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
-.seg .marks i.h { background: var(--hornet); }
-.seg .marks i.c { background: linear-gradient(135deg, var(--honey) 45%, #2a1d10 45% 55%, var(--honey) 55%); }
+.seg .marks i { width: 12px; height: 12px; display: block; background: var(--guard); clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); }
+.seg .marks i.q { background: var(--queen); }
+.seg .marks i.b { background: linear-gradient(135deg, var(--honey) 45%, #2a1d10 45% 55%, var(--honey) 55%); }
 .hive-note { margin: 8px 2px 0; color: var(--ink-dim); font-size: 14px; line-height: 1.4; }
 
 .primary, .ghost, .strip {
@@ -176,8 +176,8 @@ h2 { font-size: 30px; }
 .how ul { padding-left: 20px; margin: 10px 0 0; color: var(--ink-dim); line-height: 1.5; font-size: 15px; }
 .how li { margin-bottom: 6px; }
 .how b { color: var(--ink); }
-.k-w { color: var(--wasp); font-weight: 700; }
-.k-h { color: var(--hornet); font-weight: 700; }
+.k-g { color: var(--guard); font-weight: 700; }
+.k-q { color: var(--queen); font-weight: 700; }
 .code-form { display: flex; gap: 8px; margin-top: 10px; }
 .code-form input {
   flex: 1; min-width: 0;

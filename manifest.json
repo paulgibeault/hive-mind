@@ -1,7 +1,7 @@
 {
   "name": "Hive Mind",
   "short_name": "Hive Mind",
-  "description": "Uncap every safe cell of the honeycomb. Leave the wasps asleep.",
+  "description": "Uncap every safe cell of the honeycomb. Leave the guards asleep.",
   "scope": "/hive-mind/",
   "start_url": "/hive-mind/",
   "display": "standalone",

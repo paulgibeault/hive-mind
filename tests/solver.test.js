@@ -3,16 +3,16 @@
  * force on small frames. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { solve, SAFE, WASP, HORNET } from '../solver.js';
+import { solve, SAFE, GUARD, QUEEN } from '../solver.js';
 import { neighbours } from '../hex.js';
 import * as C from '../core.js';
 
-const BIT = [SAFE, WASP, HORNET];
+const BIT = [SAFE, GUARD, QUEEN];
 
 function run(f) {
   const nbrs = C.nbrsOf(f.cols, f.rows);
   const n = f.cols * f.rows;
-  const dom = new Uint8Array(n).fill(f.hornets ? 7 : 3);
+  const dom = new Uint8Array(n).fill(f.queens ? 7 : 3);
   const opened = new Uint8Array(n);
   const wrong = [];
   const open = (i) => {
@@ -54,12 +54,12 @@ test('also sound on frames it cannot finish (raw random layouts)', () => {
     const rnd = () => ((x = (Math.imul(x, 1664525) + 1013904223) >>> 0) / 4294967296);
     const nb = C.nbrsOf(f.cols, f.rows);
     const clear = new Set([f.start, ...nb[f.start]]);
-    f.cells = f.cells.map((_, i) => (clear.has(i) ? 0 : rnd() < 0.28 ? (f.hornets && rnd() < 0.4 ? 2 : 1) : 0));
-    f.cracked = f.cracked.map(() => 0);
+    f.cells = f.cells.map((_, i) => (clear.has(i) ? 0 : rnd() < 0.28 ? (f.queens && rnd() < 0.4 ? 2 : 1) : 0));
+    f.broken = f.broken.map(() => 0);
     for (let i = 0; i < f.cells.length; i++) {
       f.shown[i] = nb[i].filter((j) => f.cells[j] === 1).length;
       f.shownH[i] = nb[i].filter((j) => f.cells[j] === 2).length;
-      if (!f.hornets) f.shown[i] += f.shownH[i];
+      if (!f.queens) f.shown[i] += f.shownH[i];
     }
     if (!C.floods(f, f.start)) continue;
     const { dom, done, wrong } = run(f);
@@ -82,7 +82,7 @@ test('exact on a tiny frame, against brute force over every layout', () => {
     const dom = new Uint8Array(n).fill(3);
     const opened = new Uint8Array(n);
     opened[0] = 1; dom[0] = SAFE;
-    solve(nbrs, dom, (i) => (i === 0 ? { wasps: clue, hornets: 0 } : null), (i) => { opened[i] = 1; }, opened);
+    solve(nbrs, dom, (i) => (i === 0 ? { guards: clue, queens: 0 } : null), (i) => { opened[i] = 1; }, opened);
     // brute force: which values can each neighbour take given the clue?
     const k = nbrs[0].length;
     for (let t = 0; t < k; t++) {
@@ -92,21 +92,49 @@ test('exact on a tiny frame, against brute force over every layout', () => {
         if (c !== clue) continue;
         if ((a >> t) & 1) can1 = true; else can0 = true;
       }
-      const want = (can0 ? SAFE : 0) | (can1 ? WASP : 0);
+      const want = (can0 ? SAFE : 0) | (can1 ? GUARD : 0);
       assert.equal(dom[nbrs[0][t]], want, `mask ${mask} nbr ${t}`);
     }
   }
 });
 
-test('cracked clues: {total: d} allows d−1 and d+1, never d', () => {
-  // a lone clue with 2 hidden neighbours and total 1 → {0, 2}: all safe or all wasps; undecided.
-  // total 3 with 2 neighbours → only 2 fits → both wasps.
-  const nbrs = [[1, 2], [0], [0]];
-  const dom = new Uint8Array(3).fill(3);
-  const opened = new Uint8Array(3); opened[0] = 1; dom[0] = SAFE;
-  solve(nbrs, dom, (i) => (i === 0 ? { total: 3 } : null), () => {}, opened);
-  assert.deepEqual([...dom], [SAFE, WASP, WASP]);
-  const d2 = new Uint8Array(3).fill(3); d2[0] = SAFE;
-  solve(nbrs, d2, (i) => (i === 0 ? { total: 1 } : null), () => {}, opened);
-  assert.deepEqual([...d2], [SAFE, 3, 3]);
+test('broken comb: clueAt is null there, it adds nothing, and the solver still finishes', () => {
+  // generated Wildflowers frames: every broken cell reads null, and the
+  // solver clears the frame without ever leaning on one
+  for (let seed = 1; seed <= 40; seed++) {
+    const f = C.generate('wildflowers', seed);
+    const broken = f.broken.flatMap((b, i) => (b ? [i] : []));
+    assert.equal(broken.length, C.HIVES.find((h) => h.id === 'wildflowers').broken);
+    for (const i of broken) assert.equal(C.clueOf(f, i), null);
+    const { done, wrong } = run(f);
+    assert.ok(done, `wildflowers/${seed}`);
+    assert.deepEqual(wrong, []);
+  }
+
+  // brute force, 4×3: cell 0 an opened plain clue, cell 5 opened broken comb.
+  // The broken cell must add no constraint: the solver's verdict on cell 0's
+  // hidden neighbours is exactly what enumeration over cell 0's clue gives.
+  const cols = 4, rows = 3, n = 12;
+  const nbrs = neighbours(cols, rows);
+  const around = nbrs[0].filter((j) => j !== 5);
+  for (let mask = 0; mask < 1 << n; mask += 29) {
+    if (mask & 1 || mask & (1 << 5)) continue;
+    const cells = [...Array(n)].map((_, i) => (mask >> i) & 1);
+    const clue = nbrs[0].filter((j) => cells[j]).length;
+    const dom = new Uint8Array(n).fill(3);
+    const opened = new Uint8Array(n);
+    opened[0] = opened[5] = 1; dom[0] = dom[5] = SAFE;
+    solve(nbrs, dom, (i) => (i === 0 ? { guards: clue, queens: 0 } : null), (i) => { opened[i] = 1; }, opened);
+    for (const t of around) {
+      let can0 = false, can1 = false;
+      for (let a = 0; a < 1 << around.length; a++) {
+        let c = 0; for (let b = 0; b < around.length; b++) c += (a >> b) & 1;
+        if (c !== clue) continue;
+        if ((a >> around.indexOf(t)) & 1) can1 = true; else can0 = true;
+      }
+      assert.equal(dom[t], (can0 ? SAFE : 0) | (can1 ? GUARD : 0), `mask ${mask} cell ${t}`);
+    }
+    // cells next to the broken comb only are never decided
+    for (const j of nbrs[5]) if (!opened[j] && !nbrs[0].includes(j)) assert.equal(dom[j], 3, `mask ${mask} cell ${j}`);
+  }
 });

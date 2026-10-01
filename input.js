@@ -1,7 +1,7 @@
 /* input.js — touches, clicks and keys → cell commands.
  *
  *   tap           uncap (or sweep a number); marks instead in mark mode
- *   long-press    mark — cycles none → wasp (→ hornet) → none
+ *   long-press    mark — cycles none → guard (→ queen's guard) → none
  *   right-click   mark
  *   P / Escape    pause;  M  toggles mark mode
  *

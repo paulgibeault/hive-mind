@@ -7,6 +7,7 @@
  */
 
 import * as Core from './core.js';
+import { migrate, recordKeys } from './migrate.js';
 import { createRenderer } from './render.js';
 import { bindInput } from './input.js';
 import { initAudio, sfx } from './audio.js';
@@ -16,14 +17,14 @@ const stage = $('stage');
 const R = createRenderer($('view'));
 
 const NOTES = {
-  meadow: 'Plain comb, one kind of wasp. Where every hive starts.',
-  orchard: 'Wasps and hornets. Every cell counts each kind separately.',
-  wild: 'Some cells are cracked: their number is off by exactly one.',
+  clover: 'Plain comb, one kind of guard. Where every hive starts.',
+  apple: "Guards and the queen's guards. Every cell counts each kind separately.",
+  wildflowers: 'Some comb is broken: safe, but it tells you nothing.',
 };
 const MARKS = {
-  meadow: '<i></i>',
-  orchard: '<i></i><i class="h"></i>',
-  wild: '<i></i><i class="c"></i>',
+  clover: '<i></i>',
+  apple: '<i></i><i class="q"></i>',
+  wildflowers: '<i></i><i class="b"></i>',
 };
 
 let s = null;                 // the core state, or null in the menu
@@ -85,11 +86,11 @@ function renderHud() {
     n.append(dot, String(left));
     count.append(n);
   };
-  if (s.hornets > 0) {
-    pill(s.wasps - Core.marksOf(s, Core.MARK_W));
-    pill(s.hornets - Core.marksOf(s, Core.MARK_H), 'h');
+  if (s.queens > 0) {
+    pill(s.guards - Core.marksOf(s, Core.MARK_G));
+    pill(s.queens - Core.marksOf(s, Core.MARK_Q), 'q');
   } else {
-    pill(s.wasps - Core.marksOf(s, Core.MARK_W) - Core.marksOf(s, Core.MARK_H));
+    pill(s.guards - Core.marksOf(s, Core.MARK_G) - Core.marksOf(s, Core.MARK_Q));
   }
   count.setAttribute('aria-label', `${count.textContent} left unmarked`);
   paintClock();
@@ -218,7 +219,7 @@ function drain() {
         runClock(false);
         dropRun();
         $('lost-note').textContent = daily ? `Daily frame · ${daily}` : Core.hiveById(s.hive).name;
-        $('lost-title').textContent = e.kind === Core.H ? 'Stung by a hornet' : 'Stung';
+        $('lost-title').textContent = e.kind === Core.Q ? "Stung by a queen's guard" : 'Stung';
         $('lost-left').textContent = `${Core.safeLeft(s)} safe cells were still capped.`;
         show('lost');
         break;
@@ -282,10 +283,29 @@ function segmented(el, items, get, set) {
   return paint;
 }
 
+// ── stored data from older versions ──────────────────────────────────────
+// migrate.js decides; this only reads the stores and writes back what moved.
+// Safe to run on every boot and after every save import: a second pass finds
+// nothing to do.
+function migrateStored() {
+  const m = migrate({
+    run: Arcade.state.get('run'),
+    records: Object.fromEntries(recordKeys().map((k) => [k, Arcade.records.get(k)])),
+    frames: Arcade.stats.get('frames'),
+    daily: Arcade.stats.get('daily'),
+  });
+  if (m.run !== undefined) Arcade.state.set('run', m.run);
+  for (const [k, rec] of Object.entries(m.records)) Arcade.records.set(k, rec);
+  for (const k of m.dropRecords) Arcade.records.clear(k);
+  if (m.frames) Arcade.stats.update('frames', () => m.frames);
+  if (m.daily) Arcade.stats.update('daily', () => m.daily);
+}
+
 // ── boot ─────────────────────────────────────────────────────────────────
 async function boot() {
   await Arcade.ready;
   initAudio();
+  migrateStored();
 
   prefs = { ...prefs, ...(Arcade.state.get('prefs') || {}) };
   clock = Arcade.session.start();
@@ -302,7 +322,7 @@ async function boot() {
 
   function openMenu() {
     const run = Arcade.state.get('run');
-    const live = run && run.s && run.s.v === 1 && run.s.phase === 'play';
+    const live = run && run.s && run.s.v === Core.SAVE_V && run.s.phase === 'play';
     $('continue').hidden = !live;
     if (live) {
       const hive = Core.hiveById(run.s.hive);
@@ -359,6 +379,7 @@ async function boot() {
   // case the frame is evicted while we're away.
   Arcade.onSuspend(() => { if (mode === 'play') show('paused'); persistRun(); });
   Arcade.onStateReplaced(() => {
+    migrateStored();
     prefs = { hive: 0, ...(Arcade.state.get('prefs') || {}) };
     openMenu();
   });

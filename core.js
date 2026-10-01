@@ -1,14 +1,15 @@
 /* core.js — Hive Mind: the rules. Seeded, deterministic; no DOM, no clock.
  *
- * A FRAME of honeycomb hides wasps. Uncap a cell and it tells you how many
- * of its six neighbours hide one. Uncap every safe cell to take the honey;
- * uncap a wasp and you are stung.
+ * A FRAME of honeycomb hides sleeping guard bees. Uncap a cell and it tells
+ * you how many of its six neighbours hide one. Uncap every safe cell to take
+ * the honey; uncap a guard and you are stung.
  *
  * Three hives, each adding one idea to that:
- *   meadow   the plain comb — one kind of wasp
- *   orchard  wasps AND hornets; a cell counts each kind separately
- *   wild     one kind, but some cells are CRACKED: their number is off by
- *            exactly one, up or down. The crack is visible; the lie is fair.
+ *   clover       the plain comb — one kind of guard
+ *   apple        guards AND the queen's guards; a cell counts each kind
+ *                separately
+ *   wildflowers  one kind, but some comb is BROKEN: safe, but it tells you
+ *                nothing. The break is drawn once it is uncapped, never before.
  *
  * Every frame is fixed by (hive, seed) and ships with its OPENING already
  * uncapped. The generator keeps only frames the solver (solver.js) can
@@ -19,25 +20,32 @@
 
 import { makeRng } from './arcade-rng.js';
 import { neighbours } from './hex.js';
-import { solve, SAFE, WASP, HORNET } from './solver.js';
+import { solve, SAFE, GUARD, QUEEN } from './solver.js';
 
 export const HIVES = [
-  { id: 'meadow',  name: 'Meadow',  cols: 8, rows: 15, wasps: 23, hornets: 0,  cracked: 0 },
-  { id: 'orchard', name: 'Orchard', cols: 9, rows: 18, wasps: 18, hornets: 13, cracked: 0 },
-  { id: 'wild',    name: 'Wild',    cols: 9, rows: 18, wasps: 31, hornets: 0,  cracked: 20 },
+  { id: 'clover',      name: 'Clover Field',  cols: 8, rows: 15, guards: 23, queens: 0,  broken: 0 },
+  { id: 'apple',       name: 'Apple Orchard', cols: 9, rows: 18, guards: 18, queens: 13, broken: 0 },
+  { id: 'wildflowers', name: 'Wildflowers',   cols: 9, rows: 18, guards: 31, queens: 0,  broken: 6 },
 ];
-export const hiveById = (id) => HIVES.find((h) => h.id === id) || HIVES[0];
+
+// The hives' ids before 2026-09-28. Saves, records and codes from then still
+// name them; this map is the one place those names live.
+export const OLD_IDS = Object.freeze({ meadow: 'clover', orchard: 'apple', wild: 'wildflowers' });
+const current = (id) => (Object.hasOwn(OLD_IDS, id) ? OLD_IDS[id] : id);
+export const hiveById = (id) => HIVES.find((h) => h.id === current(id)) || HIVES[0];
 
 // Sizes fill a portrait phone (the frame is width-bound at 8–9 cells across).
 // Densities (~19%) are first guesses, set so a fair frame still turns up in a
 // handful of tries (a millisecond or two); tune them by playtest.
 
 // a cell's contents
-export const EMPTY = 0, W = 1, H = 2;
+export const EMPTY = 0, G = 1, Q = 2;
 // a player's mark on a hidden cell
-export const NONE = 0, MARK_W = 1, MARK_H = 2;
+export const NONE = 0, MARK_G = 1, MARK_Q = 2;
 
-const MAX_TRIES = 4000;
+export const MAX_TRIES = 4000;
+// the save format of a game state: 2 since the guards and broken comb
+export const SAVE_V = 2;
 
 const nbrCache = new Map();
 export function nbrsOf(cols, rows) {
@@ -46,21 +54,21 @@ export function nbrsOf(cols, rows) {
   return nbrCache.get(k);
 }
 
-/** What cell i reads, from the contents alone (no crack applied). */
+/** What cell i reads, from the contents alone. */
 function count(nbrs, cells, i) {
-  let w = 0, h = 0;
-  for (const j of nbrs[i]) { if (cells[j] === W) w++; else if (cells[j] === H) h++; }
-  return { w, h };
+  let g = 0, q = 0;
+  for (const j of nbrs[i]) { if (cells[j] === G) g++; else if (cells[j] === Q) q++; }
+  return { g, q };
 }
 
-/** The clue a revealed cell shows: { wasps, hornets } or, cracked, { total }. */
+/** The clue a revealed cell shows: { guards, queens }, or null for broken comb. */
 export function clueOf(f, i) {
-  if (f.cracked[i]) return { total: f.shown[i] };
-  return { wasps: f.shown[i], hornets: f.shownH[i] };
+  if (f.broken[i]) return null;
+  return { guards: f.shown[i], queens: f.shownH[i] };
 }
 
 /** Does uncapping this cell open its neighbours too? (A plain zero.) */
-export const floods = (f, i) => !f.cracked[i] && f.shown[i] === 0 && f.shownH[i] === 0;
+export const floods = (f, i) => !f.broken[i] && f.shown[i] === 0 && f.shownH[i] === 0;
 
 /** Uncap i and flood from it; returns every index newly opened. */
 function flood(f, nbrs, open, i) {
@@ -80,7 +88,7 @@ function flood(f, nbrs, open, i) {
 export function solvable(f) {
   const nbrs = nbrsOf(f.cols, f.rows);
   const n = f.cols * f.rows;
-  const kinds = f.hornets > 0 ? SAFE | WASP | HORNET : SAFE | WASP;
+  const kinds = f.queens > 0 ? SAFE | GUARD | QUEEN : SAFE | GUARD;
   const dom = new Uint8Array(n).fill(kinds);
   const opened = new Uint8Array(n);
   const open = (i) => { for (const c of flood(f, nbrs, opened, i)) dom[c] = SAFE; };
@@ -99,31 +107,21 @@ function candidate(hive, rng) {
   const clear = new Set([start, ...nbrs[start]]);
   const pool = rng.shuffle([...Array(n).keys()].filter((i) => !clear.has(i)));
   const cells = new Array(n).fill(EMPTY);
-  pool.slice(0, hive.wasps).forEach((i) => { cells[i] = W; });
-  pool.slice(hive.wasps, hive.wasps + hive.hornets).forEach((i) => { cells[i] = H; });
+  pool.slice(0, hive.guards).forEach((i) => { cells[i] = G; });
+  pool.slice(hive.guards, hive.guards + hive.queens).forEach((i) => { cells[i] = Q; });
 
-  const shown = new Array(n).fill(0), shownH = new Array(n).fill(0), cracked = new Array(n).fill(0);
+  const shown = new Array(n).fill(0), shownH = new Array(n).fill(0), broken = new Array(n).fill(0);
   for (let i = 0; i < n; i++) {
     const c = count(nbrs, cells, i);
-    shown[i] = c.w; shownH[i] = c.h;
+    shown[i] = c.g; shownH[i] = c.q;
   }
-  if (hive.cracked) {
-    // cracks go on safe cells outside the opening that have something to lie about
+  if (hive.broken) {
+    // broken comb goes on safe cells outside the opening; its count is kept
+    // (the truth), but clueOf() never shows it
     const safe = rng.shuffle([...Array(n).keys()].filter((i) => cells[i] === EMPTY && !clear.has(i)));
-    let placed = 0;
-    for (const i of safe) {
-      if (placed >= hive.cracked) break;
-      const t = shown[i];
-      const deg = nbrs[i].length;
-      // never show a cracked 0: it can only mean 1, and reads like a mistake
-      const dirs = [t - 1, t + 1].filter((d) => d >= 1 && d <= deg);
-      if (!dirs.length) continue;
-      shown[i] = rng.pick(dirs);
-      cracked[i] = 1;
-      placed++;
-    }
+    for (const i of safe.slice(0, hive.broken)) broken[i] = 1;
   }
-  return { cols, rows, wasps: hive.wasps, hornets: hive.hornets, cells, shown, shownH, cracked, start };
+  return { cols, rows, guards: hive.guards, queens: hive.queens, cells, shown, shownH, broken, start };
 }
 
 /** The frame for (hive, seed). Deterministic: same seed, same frame, anywhere. */
@@ -144,7 +142,7 @@ export function newGame(hiveId, seed) {
   const f = generate(hiveId, seed);
   const n = f.cols * f.rows;
   const s = {
-    v: 1, ...f,
+    v: SAVE_V, ...f,
     open: new Array(n).fill(0),
     mark: new Array(n).fill(NONE),
     phase: 'play',            // play | won | lost
@@ -185,10 +183,10 @@ export function reveal(s, i) {
   return true;
 }
 
-/** Cycle a hidden cell's mark: none → wasp (→ hornet, in an orchard) → none. */
+/** Cycle a hidden cell's mark: none → guard (→ queen's guard, in Apple Orchard) → none. */
 export function mark(s, i) {
   if (s.phase !== 'play' || s.open[i]) return false;
-  const top = s.hornets > 0 ? MARK_H : MARK_W;
+  const top = s.queens > 0 ? MARK_Q : MARK_G;
   s.mark[i] = s.mark[i] >= top ? NONE : s.mark[i] + 1;
   s.events.push({ type: 'mark', cell: i, mark: s.mark[i] });
   return true;
@@ -204,21 +202,21 @@ export function setMark(s, i, m) {
 
 /**
  * Sweep around an uncapped plain number whose marks already account for it:
- * every unmarked hidden neighbour is uncapped. Cracked cells can't be swept.
+ * every unmarked hidden neighbour is uncapped. Broken comb can't be swept.
  * Marks are the player's word — a wrong mark here stings, as in the classic.
  */
 export function sweep(s, i) {
-  if (s.phase !== 'play' || !s.open[i] || s.cells[i] !== EMPTY || s.cracked[i]) return false;
+  if (s.phase !== 'play' || !s.open[i] || s.cells[i] !== EMPTY || s.broken[i]) return false;
   const nbrs = nbrsOf(s.cols, s.rows);
-  let mw = 0, mh = 0;
+  let mg = 0, mq = 0;
   for (const j of nbrs[i]) {
     if (s.open[j] && s.cells[j] === EMPTY) continue;
-    if (s.mark[j] === MARK_W) mw++;
-    else if (s.mark[j] === MARK_H) mh++;
+    if (s.mark[j] === MARK_G) mg++;
+    else if (s.mark[j] === MARK_Q) mq++;
   }
-  const want = s.hornets > 0 ? [s.shown[i], s.shownH[i]] : [s.shown[i], 0];
+  const want = s.queens > 0 ? [s.shown[i], s.shownH[i]] : [s.shown[i], 0];
   // one-kind hives: any mark counts toward the one kind
-  const ok = s.hornets > 0 ? mw === want[0] && mh === want[1] : mw + mh === want[0];
+  const ok = s.queens > 0 ? mg === want[0] && mq === want[1] : mg + mq === want[0];
   const targets = nbrs[i].filter((j) => !s.open[j] && s.mark[j] === NONE);
   if (!ok || !targets.length) return false;
   s.moves++;
@@ -234,15 +232,22 @@ export function tap(s, i) {
   return s.open[i] ? sweep(s, i) : reveal(s, i);
 }
 
-/** A human-sized board code for a frame, e.g. "OR-5K2QX". */
+/** A human-sized board code for a frame, e.g. "AP-005K2QX". */
 export function boardCode(hiveId, seed) {
   return `${hiveId.slice(0, 2).toUpperCase()}-${(seed >>> 0).toString(36).toUpperCase().padStart(7, '0')}`;
 }
+/* Old codes still parse: the hive id isn't in the RNG, so an old ME-/OR- code
+ * is the same frame under its new name. (WI- is WI- either way, but its
+ * frames changed with broken comb.) */
+const PREFIX = new Map([
+  ...Object.entries(OLD_IDS).map(([old, id]) => [old.slice(0, 2), id]),
+  ...HIVES.map((h) => [h.id.slice(0, 2), h.id]),
+]);
 export function parseCode(code) {
   const m = /^\s*([A-Za-z]{2})-([0-9A-Za-z]{1,7})\s*$/.exec(code || '');
   if (!m) return null;
-  const hive = HIVES.find((h) => h.id.slice(0, 2) === m[1].toLowerCase());
+  const hive = PREFIX.get(m[1].toLowerCase());
   const seed = parseInt(m[2], 36);
   if (!hive || !Number.isFinite(seed) || seed > 0xffffffff) return null;
-  return { hive: hive.id, seed: seed >>> 0 };
+  return { hive, seed: seed >>> 0 };
 }

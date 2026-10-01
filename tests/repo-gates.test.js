@@ -36,7 +36,7 @@ test('the rules import under node with no Arcade global and no DOM in sight', as
   // two phones would stop agreeing on the same seed.
   assert.equal(typeof globalThis.Arcade, 'undefined');
   assert.equal(typeof globalThis.document, 'undefined');
-  for (const f of ['core.js', 'solver.js', 'hex.js']) {
+  for (const f of ['core.js', 'solver.js', 'hex.js', 'migrate.js']) {
     await assert.doesNotReject(() => import(`../${f}`));
     // code only: the header comment names the very things it forbids
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8')
@@ -87,16 +87,41 @@ test('sw.js cleans up only its own caches and never activates unannounced', () =
 
 // ── staging declaration ──────────────────────────────────────────────────
 test('stage.mjs publishes what the page and manifest name, and drops the dev set', () => {
-  for (const f of ['index.html', 'main.js', 'core.js', 'hex.js', 'solver.js', 'arcade-rng.js', 'render.js',
+  for (const f of ['index.html', 'main.js', 'core.js', 'hex.js', 'solver.js', 'migrate.js', 'arcade-rng.js', 'render.js',
     'input.js', 'audio.js', 'soundpack.js', 'style.css', 'manifest.json', 'sw.js', 'icon.svg', 'icon.png']) {
     assert.ok(tracked.includes(f), `${f} is not tracked`);
     assert.ok(!isDevOnly(f), `${f} would be dropped from the deploy`);
   }
   for (const f of ['README.md', 'package.json', '.gitignore', 'docs/design.md', 'tools/stage.mjs',
-    'tools/e2e.mjs', 'tests/core.test.js', 'tests/solver.test.js', '.github/workflows/pages.yml']) {
+    'tools/e2e.mjs', 'tests/core.test.js', 'tests/solver.test.js', 'tests/migrate.test.js', '.github/workflows/pages.yml']) {
     assert.ok(isDevOnly(f), `${f} would ship to the public site`);
   }
   assert.deepEqual(PRECACHE_EXCLUDE, ['LICENSE'], 'the exclusion list is meant to stay minimal');
+});
+
+// ── words ──────────────────────────────────────────────────────────────────
+// 2026-09-28: no wasps. The hazard is a sleeping guard bee, and the hives were
+// renamed. What ships (everything stage.mjs doesn't drop) must say so.
+const shipped = tracked.filter((f) => !isDevOnly(f) && !/\.(png|jpe?g|gif|webp|ico|woff2?)$/i.test(f));
+
+test('no wasps or hornets in anything that ships', () => {
+  for (const f of shipped) {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const hit = /wasp|hornet/i.exec(src);
+    assert.equal(hit, null, `${f} still says "${hit && src.slice(Math.max(0, hit.index - 30), hit.index + 30)}"`);
+  }
+});
+
+test('the old hive ids live only in the alias map and the migration', () => {
+  // migrate.js reads them from core.js's OLD_IDS; nothing else names them
+  const old = /\b(meadow|orchard|wild)\b/;
+  for (const f of shipped.filter((f) => f !== 'core.js')) {
+    assert.doesNotMatch(fs.readFileSync(path.join(ROOT, f), 'utf8'), old, `${f} names an old hive id`);
+  }
+  const lines = fs.readFileSync(path.join(ROOT, 'core.js'), 'utf8').split('\n').filter((l) => old.test(l));
+  assert.deepEqual(lines, [
+    "export const OLD_IDS = Object.freeze({ meadow: 'clover', orchard: 'apple', wild: 'wildflowers' });",
+  ]);
 });
 
 /* The two vendored fleet files (GAME_INTEGRATION §13a): never edit the copy —

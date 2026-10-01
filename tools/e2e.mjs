@@ -36,26 +36,54 @@ async function holdCell(i) {
 }
 /* The safe hidden cells the solver would open next — play like a careful player. */
 const hiddenSafe = () => H(() => { const s = window.__hive.s; return s.cells.map((c, i) => (!s.open[i] && c === 0 ? i : -1)).filter((i) => i >= 0); });
+async function clearFrame() {
+  for (const i of await hiddenSafe()) {
+    if (await H((k) => window.__hive.s.open[k], i)) continue;
+    await tapCell(i);
+    if ((await mode()) !== 'play') break;
+  }
+  await waitMode('won');
+}
 
 await page.goto(url);
 await page.waitForFunction(() => window.__hive);
+
+// v1 data (before the renames: meadow / orchard / wild, wasps and cracks)
+// comes across on boot: the run, the record, the stats
+await H(() => {
+  const { s: { guards, queens, broken, ...rest } } = { s: window.__hive.Core.newGame('apple', 0xabc) };
+  const v1 = { ...rest, v: 1, hive: 'orchard', wasps: guards, hornets: queens, cracked: broken, events: [] };
+  Arcade.state.set('run', { s: v1, ms: 4000, daily: null });
+  Arcade.records.set('time-orchard', { value: 52100, direction: 'lower', format: 'duration-ms', label: 'Orchard — fastest frame' });
+  Arcade.stats.update('frames', () => ({ orchard: { played: 3, won: 1 } }));
+  Arcade.stats.update('daily', () => ({ '2026-09-01': { ms: 90000, hive: 'orchard' } }));
+});
+await page.reload();
+await page.waitForFunction(() => window.__hive);
+assert.deepEqual(await H(() => {
+  const run = Arcade.state.get('run');
+  return [run.s.v, run.s.hive, run.s.queens, 'hornets' in run.s, Arcade.records.get('time-orchard'),
+    Arcade.records.get('time-apple').value, Arcade.stats.get('frames'), Arcade.stats.get('daily')['2026-09-01'].hive];
+}), [2, 'apple', 13, false, null, 52100, { apple: { played: 3, won: 1 } }, 'apple']);
+assert.equal(await page.textContent('#continue-title'), 'Back to the Apple Orchard frame');
 await shot('1-menu');
 
-// menu: three hives, meadow first; the daily is on offer
-assert.equal(await page.$$eval('#hive button', (b) => b.length), 3);
-assert.match(await page.textContent('#daily-title'), /^Today: (Meadow|Orchard|Wild)$/);
+// menu: three hives, Clover Field first; the daily is on offer
+assert.deepEqual(await page.$$eval('#hive button', (b) => b.map((x) => x.childNodes[1].textContent)),
+  ['Clover Field', 'Apple Orchard', 'Wildflowers']);
+assert.match(await page.textContent('#daily-title'), /^Today: (Clover Field|Apple Orchard|Wildflowers)$/);
 
-// a frame code opens exactly that frame
+// a frame code opens exactly that frame — an old OR- code too, as Apple Orchard
 await page.click('#code-box summary');
 await page.fill('#code-in', 'or-0000abc');
 await page.press('#code-in', 'Enter');
 await waitMode('play');
-assert.deepEqual(await H(() => [window.__hive.s.hive, window.__hive.s.seed]), ['orchard', parseInt('abc', 36)]);
-assert.equal(await page.textContent('#hud-code'), 'OR-0000ABC');
+assert.deepEqual(await H(() => [window.__hive.s.hive, window.__hive.s.seed]), ['apple', parseInt('abc', 36)]);
+assert.equal(await page.textContent('#hud-code'), 'AP-0000ABC');
 await page.waitForTimeout(300);
-await shot('2-orchard');
+await shot('2-apple');
 
-// long-press marks: wasp, then hornet on a second hold
+// long-press marks: guard, then queen's guard on a second hold
 const target = (await hiddenSafe())[0];
 await holdCell(target);
 assert.equal(await H((i) => window.__hive.s.mark[i], target), 1);
@@ -95,25 +123,32 @@ assert.equal(await H((i) => window.__hive.s.open[i], target), 1);
 await page.click('#resume');
 
 // clear it: tap every safe cell (skipping ones a flood already opened)
-for (const i of await hiddenSafe()) {
-  if (await H((k) => window.__hive.s.open[k], i)) continue;
-  await tapCell(i);
-  if ((await mode()) !== 'play') break;
-}
-await waitMode('won');
+await clearFrame();
 await shot('3-won');
-assert.equal(await page.textContent('#won-code'), 'OR-0000ABC');
-const rec = await H(() => Arcade.records.get('time-orchard'));
+assert.equal(await page.textContent('#won-code'), 'AP-0000ABC');
+const rec = await H(() => Arcade.records.get('time-apple'));
 assert.ok(rec && rec.value > 0 && rec.direction === 'lower');
 
-// a sting: new meadow frame, uncap a wasp
+// a sting from a queen's guard says so
 await page.click('#won-menu');
+await page.click('#hive button:nth-child(2)');
+await page.click('#play');
+await waitMode('play');
+await tapCell(await H(() => window.__hive.s.cells.indexOf(2)));
+await waitMode('lost');
+assert.equal(await page.textContent('#lost-title'), "Stung by a queen's guard");
+await page.waitForTimeout(500);
+await shot('4-stung-queen');
+
+// a sting: new Clover Field frame, uncap a guard
+await page.click('#lost-menu');
 await page.click('#hive button:nth-child(1)');
 await page.click('#play');
 await waitMode('play');
-const wasp = await H(() => window.__hive.s.cells.indexOf(1));
-await tapCell(wasp);
+const guard = await H(() => window.__hive.s.cells.indexOf(1));
+await tapCell(guard);
 await waitMode('lost');
+assert.equal(await page.textContent('#lost-title'), 'Stung');
 await page.waitForTimeout(500);
 await shot('4-stung');
 assert.equal(await H(() => Arcade.state.get('run')), null, 'a stung frame is not resumable');
@@ -122,19 +157,36 @@ await page.click('#retry');
 await waitMode('play');
 assert.equal(await H(() => window.__hive.s.seed), seed, 'same frame again');
 
-// wild: the cracked cells show up
+// Wildflowers: broken comb shows up once uncapped
 await page.click('#pause'); await page.click('#quit');
 await page.click('#hive button:nth-child(3)');
 await page.click('#play');
 await waitMode('play');
-// open everything safe except a few, so the cracks are visible in the shot
+assert.equal(await H(() => window.__hive.s.hive), 'wildflowers');
+// open everything safe except a few, so the broken comb is visible in the shot
 const safe = await hiddenSafe();
 for (const i of safe.slice(0, Math.floor(safe.length * 0.6))) {
   if (await H((k) => window.__hive.s.open[k], i)) continue;
   await tapCell(i);
 }
 await page.waitForTimeout(300);
-await shot('5-wild');
+await shot('5-wildflowers');
+
+// every hive plays out: a real frame cleared on each, and each records its time
+for (let k = 1; k <= 3; k++) {
+  await page.click('#pause'); await page.click('#quit');
+  await page.click(`#hive button:nth-child(${k})`);
+  await page.click('#play');
+  await waitMode('play');
+  const id = await H(() => window.__hive.s.hive);
+  assert.equal(id, await H((n) => window.__hive.Core.HIVES[n].id, k - 1));
+  await clearFrame();
+  const r = await H((c) => Arcade.records.get(c), `time-${id}`);
+  assert.ok(r && r.value > 0, `time-${id}`);
+  await shot(`6-won-${id}`);
+  await page.click('#again');
+  await waitMode('play');
+}
 
 // the daily: today's frame, and it records
 await page.click('#pause'); await page.click('#quit');
@@ -142,21 +194,16 @@ await page.click('#daily');
 await waitMode('play');
 const t = await H(() => window.__hive.today());
 assert.deepEqual(await H(() => [window.__hive.s.hive, window.__hive.s.seed]), [t.hive, t.seed]);
-for (const i of await hiddenSafe()) {
-  if (await H((k) => window.__hive.s.open[k], i)) continue;
-  await tapCell(i);
-  if ((await mode()) !== 'play') break;
-}
-await waitMode('won');
+await clearFrame();
 await page.click('#won-menu');
 assert.match(await page.textContent('#daily-title'), /cleared$/);
-await shot('6-menu-after-daily');
+await shot('7-menu-after-daily');
 
 // landscape
 await page.click('#play');
 await page.setViewportSize({ width: 1280, height: 720 });
 await page.waitForTimeout(300);
-await shot('7-landscape');
+await shot('8-landscape');
 
 await browser.close();
 assert.deepEqual(problems, [], 'console must stay clean');

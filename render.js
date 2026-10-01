@@ -3,15 +3,18 @@
  * Capped cells are bright honey wax; an uncapped cell is dark, empty comb
  * with its reading in it. Nothing moves unless something just happened: an
  * uncap fades its caps out, a sting flashes, and then the loop rests.
+ *
+ * No tells: a capped cell is drawn from the cap sprite and the player's mark
+ * alone, never from what it hides — broken comb included.
  */
 
 import { centre, extent, cellAt as hexAt } from './hex.js';
-import { EMPTY, W, H, MARK_W, MARK_H } from './core.js';
+import { EMPTY, Q, MARK_Q } from './core.js';
 
 const C = {
   cap: '#f2b33d', capDeep: '#c9801a', capHi: '#ffd978',
-  wax: '#3b2b19', waxEdge: '#2a1e11',
-  ink: '#f6ead2', wasp: '#f5c542', hornet: '#ec5b45', dark: '#2a1d10',
+  wax: '#3b2b19', waxEdge: '#2a1e11', sealHi: '#5a4128', sealDeep: '#1c140b',
+  ink: '#f6ead2', guard: '#f5c542', queen: '#ec5b45', dark: '#2a1d10',
 };
 const FADE_MS = 200;
 const FONT = 'ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif';
@@ -78,7 +81,31 @@ export function createRenderer(canvas) {
       g.lineWidth = Math.max(1, r * 0.1);
       g.stroke();
     };
-    sprites = { cap: sprite(cap), open: sprite(open) };
+    // a won frame's guards, sealed over in dark wax: shaped like a cap, so the
+    // frame reads as finished comb rather than a map of where they slept
+    const sealed = (g, x, y, r) => {
+      hexPath(g, x, y, inner(r));
+      const grad = g.createLinearGradient(x, y - r, x, y + r);
+      grad.addColorStop(0, C.sealHi);
+      grad.addColorStop(0.5, C.wax);
+      grad.addColorStop(1, C.sealDeep);
+      g.fillStyle = grad;
+      g.fill();
+      g.save();
+      hexPath(g, x, y, inner(r));
+      g.clip();
+      const hi = g.createRadialGradient(x - r * 0.25, y - r * 0.35, 0, x - r * 0.25, y - r * 0.35, r * 0.8);
+      hi.addColorStop(0, 'rgba(255,220,160,0.22)');
+      hi.addColorStop(1, 'rgba(255,220,160,0)');
+      g.fillStyle = hi;
+      g.fillRect(x - r, y - r, 2 * r, 2 * r);
+      g.restore();
+      hexPath(g, x, y, inner(r));
+      g.strokeStyle = 'rgba(242,179,61,0.3)';
+      g.lineWidth = Math.max(1, r * 0.05);
+      g.stroke();
+    };
+    sprites = { cap: sprite(cap), open: sprite(open), sealed: sprite(sealed) };
   }
 
   function resize(w, h, cols, rows, top) {
@@ -113,53 +140,81 @@ export function createRenderer(canvas) {
     ctx.drawImage(img, x - s / 2, y - s / 2, s, s);
   }
 
-  // ── the marks and the wasps ─────────────────────────────────────────
+  // ── the marks and the guards ────────────────────────────────────────
   function bug(x, y, r, kind) {
+    // a round, fuzzy guard bee, asleep; the queen's guard is the same bee in
+    // red with a small crown
     const s = r * 0.42;
+    const queen = kind === Q;
+    const body = queen ? C.queen : C.guard;
     ctx.save();
     ctx.translate(x, y);
-    ctx.rotate(-0.5);
-    // wings
-    ctx.fillStyle = 'rgba(246,234,210,0.55)';
-    ctx.beginPath(); ctx.ellipse(-s * 0.35, -s * 0.55, s * 0.45, s * 0.25, -0.6, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(s * 0.35, -s * 0.55, s * 0.45, s * 0.25, 0.6, 0, Math.PI * 2); ctx.fill();
-    // body, striped
-    ctx.beginPath(); ctx.ellipse(0, 0, s * 0.95, s * 0.55, 0, 0, Math.PI * 2);
-    ctx.fillStyle = kind === H ? C.hornet : C.wasp;
+    // wings, folded back
+    ctx.fillStyle = 'rgba(246,234,210,0.6)';
+    ctx.beginPath(); ctx.ellipse(-s * 0.55, -s * 0.72, s * 0.42, s * 0.26, -0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(s * 0.55, -s * 0.72, s * 0.42, s * 0.26, 0.5, 0, Math.PI * 2); ctx.fill();
+    // fuzz: a ring of soft tufts just outside the body
+    ctx.fillStyle = body;
+    for (let k = 0; k < 14; k++) {
+      const a = (k / 14) * Math.PI * 2;
+      ctx.beginPath(); ctx.arc(Math.cos(a) * s * 0.86, Math.sin(a) * s * 0.8, s * 0.16, 0, Math.PI * 2); ctx.fill();
+    }
+    // body, round, with two soft bands
+    ctx.beginPath(); ctx.ellipse(0, 0, s * 0.9, s * 0.84, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.save(); ctx.clip();
-    ctx.fillStyle = C.dark;
-    for (const dx of [-0.35, 0.15, 0.62]) ctx.fillRect(s * dx - s * 0.12, -s, s * 0.22, 2 * s);
+    ctx.fillStyle = 'rgba(42,29,16,0.75)';
+    for (const dy of [0.12, 0.52]) ctx.fillRect(-s, s * dy, 2 * s, s * 0.18);
     ctx.restore();
-    ctx.beginPath(); ctx.arc(-s * 1.0, 0, s * 0.34, 0, Math.PI * 2);
-    ctx.fillStyle = kind === H ? '#6b1d12' : C.dark;
-    ctx.fill();
+    // closed eyes: two sleepy arcs
+    ctx.strokeStyle = C.dark;
+    ctx.lineWidth = Math.max(1, r * 0.055);
+    ctx.lineCap = 'round';
+    for (const ex of [-0.32, 0.32]) {
+      ctx.beginPath(); ctx.arc(s * ex, -s * 0.22, s * 0.16, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+    }
+    if (queen) {
+      // the crown: a notched band on top of the head
+      const cy = -s * 0.86, w = s * 0.34;
+      ctx.fillStyle = C.capHi;
+      ctx.beginPath();
+      ctx.moveTo(-w, cy + s * 0.12);
+      ctx.lineTo(-w, cy - s * 0.2);
+      ctx.lineTo(-w * 0.5, cy - s * 0.04);
+      ctx.lineTo(0, cy - s * 0.26);
+      ctx.lineTo(w * 0.5, cy - s * 0.04);
+      ctx.lineTo(w, cy - s * 0.2);
+      ctx.lineTo(w, cy + s * 0.12);
+      ctx.closePath();
+      ctx.fill();
+    }
     ctx.restore();
   }
 
   function markGlyph(x, y, r, m) {
-    // a pin pushed into the wax: amber disc (wasp) or red square (hornet),
+    // a pin pushed into the wax: amber disc (guard) or red square (queen's guard),
     // shaped differently so the colours are never the only difference
     const s = r * 0.3;
     ctx.save();
     ctx.shadowColor = 'rgba(42,29,16,0.5)';
     ctx.shadowBlur = r * 0.15;
     ctx.shadowOffsetY = r * 0.06;
-    ctx.fillStyle = m === MARK_H ? C.hornet : C.dark;
+    ctx.fillStyle = m === MARK_Q ? C.queen : C.dark;
     ctx.beginPath();
-    if (m === MARK_H) ctx.rect(x - s, y - s, 2 * s, 2 * s);
+    if (m === MARK_Q) ctx.rect(x - s, y - s, 2 * s, 2 * s);
     else ctx.arc(x, y, s * 1.05, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-    ctx.fillStyle = m === MARK_H ? C.dark : C.wasp;
+    ctx.fillStyle = m === MARK_Q ? C.dark : C.guard;
     ctx.beginPath();
-    if (m === MARK_H) ctx.rect(x - s * 0.35, y - s * 0.35, s * 0.7, s * 0.7);
+    if (m === MARK_Q) ctx.rect(x - s * 0.35, y - s * 0.35, s * 0.7, s * 0.7);
     else ctx.arc(x, y, s * 0.42, 0, Math.PI * 2);
     ctx.fill();
   }
 
   function crack(x, y, r, i) {
-    // a jagged line across the cell, its shape fixed per cell
+    // a jagged break across the cell, its shape fixed per cell: a dark split
+    // with a honey-lit edge, so it can't be mistaken for an empty zero
     let h = (i * 2654435761) >>> 0;
     const rnd = () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0) / 4294967296);
     const a = rnd() * Math.PI;
@@ -171,8 +226,12 @@ export function createRenderer(canvas) {
       const px = x + dx * t * r - dy * j, py = y + dy * t * r + dx * j;
       if (k) ctx.lineTo(px, py); else ctx.moveTo(px, py);
     }
-    ctx.strokeStyle = 'rgba(12,8,4,0.85)';
-    ctx.lineWidth = Math.max(1.2, r * 0.07);
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(12,8,4,0.9)';
+    ctx.lineWidth = Math.max(2, r * 0.13);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(242,179,61,0.55)';
+    ctx.lineWidth = Math.max(1, r * 0.045);
     ctx.stroke();
   }
 
@@ -181,31 +240,26 @@ export function createRenderer(canvas) {
     const big = Math.round(r * 0.95);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    if (s.cracked[i]) {
+    if (s.broken[i]) {
+      // broken comb: safe, and it reads nothing
       crack(x, y, r, i);
-      ctx.font = `800 ${big}px ${FONT}`;
-      ctx.fillStyle = C.ink;
-      ctx.fillText(String(w), x - r * 0.12, y + r * 0.04);
-      ctx.font = `700 ${Math.round(r * 0.5)}px ${FONT}`;
-      ctx.fillStyle = C.cap;
-      ctx.fillText('±', x + r * 0.42, y - r * 0.32);
       return;
     }
-    if (s.hornets > 0) {
+    if (s.queens > 0) {
       const both = w > 0 && h > 0;
       const size = both ? Math.round(r * 0.72) : big;
       ctx.font = `800 ${size}px ${FONT}`;
       if (w > 0) {
-        ctx.fillStyle = C.wasp;
+        ctx.fillStyle = C.guard;
         ctx.fillText(String(w), both ? x - r * 0.33 : x, y + r * 0.04);
       }
       if (h > 0) {
         const hx = both ? x + r * 0.33 : x;
         const b = size * 0.62;
-        ctx.strokeStyle = C.hornet;
+        ctx.strokeStyle = C.queen;
         ctx.lineWidth = Math.max(1.2, r * 0.07);
         ctx.strokeRect(hx - b, y - b + r * 0.02, 2 * b, 2 * b);
-        ctx.fillStyle = C.hornet;
+        ctx.fillStyle = C.queen;
         ctx.fillText(String(h), hx, y + r * 0.04);
       }
       return;
@@ -247,8 +301,13 @@ export function createRenderer(canvas) {
         continue;
       }
       const hazard = s.cells[i] !== EMPTY;
+      if (over && hazard && s.phase === 'won') {
+        // a won frame seals its guards in; they sleep on
+        blit(sprites.sealed, x, y);
+        continue;
+      }
       if (over && hazard) {
-        // the end of a frame shows where everything was
+        // a stung frame shows where every guard was
         blit(sprites.open, x, y);
         if (i === s.stung) {
           hexPath(ctx, x, y, r * 0.9);
