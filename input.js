@@ -4,6 +4,8 @@
  *   long-press    mark — cycles none → guard (→ queen's guard) → none
  *   right-click   mark
  *   P / Escape    pause;  M  toggles mark mode
+ *   H             the bee-line hint: open, then why, then close (#07).
+ *                 Escape closes an open hint before it pauses
  *
  * A press that drifts more than a finger's width is abandoned: nothing on
  * this board is dragged, so a drift is a mis-touch, not a gesture.
@@ -70,7 +72,9 @@ export function bindInput(el, h) {
 
   window.addEventListener('keydown', (e) => {
     if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
-    if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') { h.onPause(); e.preventDefault(); }
+    if (e.key === 'Escape' && h.onEscape && h.onEscape()) e.preventDefault();
+    else if ((e.key === 'h' || e.key === 'H') && h.onHint && h.active()) { h.onHint(); e.preventDefault(); }
+    else if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') { h.onPause(); e.preventDefault(); }
     else if ((e.key === 'm' || e.key === 'M') && h.active()) { h.onToggle(); e.preventDefault(); }
   });
 

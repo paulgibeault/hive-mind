@@ -13,6 +13,7 @@ import { bindInput } from './input.js';
 import { initAudio, sfx, sfxReset, cueContext } from './audio.js';
 import { refused } from './juice.js';
 import * as Reads from './reads.js';
+import * as Hint from './hint.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -64,6 +65,7 @@ function paintClock() { $('hud-clock').textContent = fmt(elapsed()); }
 // ── sheets ───────────────────────────────────────────────────────────────
 const SHEETS = ['menu', 'paused', 'won', 'lost'];
 function show(next) {
+  if (next !== 'play') unhint();          // a hint lives only over a live frame (#07)
   mode = next;
   for (const id of SHEETS) $(id).hidden = id !== mode;
   $('rail').hidden = !s || mode === 'menu';
@@ -144,6 +146,7 @@ function begin(state, opts = {}) {
   reads = opts.reads || Reads.fresh();
   clock.reset();
   clock.pause();
+  lastTap = -1;
   markMode = false;
   sfxReset();
   R.reset();
@@ -250,6 +253,8 @@ function recordWin() {
   const many = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
   $('won-reads').textContent = `${reads.clean} of ${total} clean · ${many(reads.hints, 'hint')} · ${many(reads.puffs, 'puff')}`;
   $('won-pure').hidden = !pure;
+  $('won-help').textContent = Hint.costLine(reads.hints);   // #07
+  $('won-help').hidden = !reads.hints;
 }
 
 // ── the sting lesson (#04) ──────────────────────────────────────────────
@@ -279,8 +284,7 @@ function unteach() {
  * them all (a guess's safe cell can be far from the sting), the sheet stays
  * at the bottom and the frame keeps the lesson's own rings in view — the
  * proof, or the safe cell — ahead of the red one the player just tapped. */
-function placeLesson(now) {
-  const sheet = $('lost');
+function placeLesson(now, sheet = $('lost')) {
   sheet.classList.remove('top');
   stage.classList.remove('lifted');
   const rings = R.view.rings;
@@ -334,6 +338,79 @@ function puff() {
   show('play');
   drain(null);
   persistRun();
+}
+
+// ── the bee-line hint (#07) ─────────────────────────────────────────────
+// off → look → why → off. "Look" rings the clues of the smallest proof for
+// one proven move (hint.js decides which); "why" lights the target, dashes
+// the guards those clues imply, and says why. The cost is paid as it opens:
+// +10 s on the clock and the Pure seal. The hint itself lives only in
+// memory: the run is saved with the cost paid and never with a hint open, so
+// a reload clears it. It closes on "Got it", H on its last step, Esc, any
+// tap on the frame (which still lands, act()), and any sheet (show()).
+let hint = null;              // { step: 'look' | 'why', pick } while open
+let lastTap = -1;             // the cell last tapped or marked; -1 for none (never saved)
+
+function hintStep() {
+  if (mode !== 'play' || !s) return;
+  const now = performance.now();
+  if (!hint) {
+    const pick = Hint.pickHint(s, lastTap);
+    if (!pick) return;
+    hint = { step: 'look', pick };
+    base += Hint.PENALTY_MS;
+    reads = { ...reads, hints: reads.hints + 1 };
+    Arcade.stats.update('hints', (prev) => ({ ...prev, [s.hive]: ((prev && prev[s.hive]) || 0) + 1 }));
+    renderHud();
+    persistRun();
+    paintHint(now);
+    sfx('hint', cue({ kind: 1 }));            // the bee flies past...
+  } else if (hint.step === 'look' && hint.pick.kind === 'move') {
+    hint.step = 'why';
+    paintHint(now);
+    sfx('hint', cue({ kind: 2 }));            // ...and lands
+  } else unhint(now);
+}
+
+function paintHint(now) {
+  const { step, pick } = hint, why = step === 'why';
+  const mark = (v) => (v === Core.QUEEN ? Core.MARK_Q : Core.MARK_G);
+  $('hint').hidden = false;
+  $('hint-btn').setAttribute('aria-expanded', 'true');
+  $('hint-step').textContent = why ? 'Bee-line · why' : 'Bee-line · look here';
+  $('hint-text').textContent = why ? pick.why : pick.look;
+  $('hint-why').hidden = why || pick.kind !== 'move';
+  $('hint-row').classList.toggle('one', $('hint-why').hidden);
+  const rings = pick.clues.map((i) => ({ i, color: 'honey' }));
+  const ghosts = [];
+  if (why) {
+    rings.push({ i: pick.target, color: 'lit' });
+    for (const g of pick.ghosts) ghosts.push({ i: g.i, kind: mark(g.value) });
+    if (pick.value !== Core.SAFE) ghosts.push({ i: pick.target, kind: mark(pick.value) });   // "Mark it."
+  } else R.view.ringsAt = now;
+  R.view.rings = rings;
+  R.view.ghosts = ghosts;
+  placeLesson(now, $('hint'));          // #04's placement: the card never covers the rings
+  kick();
+}
+
+function unhint(now = performance.now()) {
+  if (!hint) return;
+  hint = null;
+  $('hint').hidden = true;
+  $('hint').classList.remove('top');
+  $('hint-btn').setAttribute('aria-expanded', 'false');
+  R.view.rings = [];
+  R.view.ghosts = [];
+  stage.classList.remove('lifted');
+  R.lift(0, now);
+  kick();
+}
+
+function bindHint() {
+  $('hint-btn').addEventListener('click', hintStep);
+  $('hint-why').addEventListener('click', hintStep);
+  $('hint-done').addEventListener('click', () => unhint());
 }
 
 // ── core events → everything else ────────────────────────────────────────
@@ -395,6 +472,8 @@ function drain(pre) {
 
 function act(fn, i) {
   if (mode !== 'play' || !s) return;
+  lastTap = i;
+  if (hint) unhint();                   // a tap on the frame closes the hint, and still lands (#07)
   // Clean reads (#03): name what the tap would uncap and what the clues
   // proved, both BEFORE the move. One provenNow per tap; marks skip it.
   const move = fn === Core.tap ? Reads.moveAt(s, i) : null;
@@ -430,6 +509,7 @@ function fit() {
   const hive = s ? s : Core.HIVES[prefs.hive];
   R.resize(Math.max(1, r.width), Math.max(1, r.height), hive.cols, hive.rows, 56);
   if (mode === 'lost' && s) placeLesson(-1);
+  if (hint) placeLesson(-1, $('hint'));
   kick();
 }
 
@@ -557,7 +637,10 @@ async function boot() {
     onMark: (i) => act(Core.mark, i),
     onPause: pause,
     onToggle: () => { markMode = !markMode; renderHud(); },
+    onHint: hintStep,
+    onEscape: () => !!hint && (unhint(), true),     // Esc closes the hint before it pauses
   });
+  bindHint();
 
   new ResizeObserver(fit).observe(stage);
   fit();
@@ -578,6 +661,7 @@ async function boot() {
       get frames() { return frames; }, get running() { return loop.running(); },
       layout: R.layout, at: R.at, view: R.view, Core, today,
     };
+    Object.defineProperties(window.__hive, { hint: { get: () => hint }, lastTap: { get: () => lastTap } });
   }
 
   openMenu();

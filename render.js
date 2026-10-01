@@ -53,7 +53,7 @@ const GLINT_MS = 300;
 const SMOKE_MS = 1100, SMOKE_STILL_MS = 600;
 const LESSON_MS = 320;          // a sting lesson's rings fade in; the frame lifts as long
 // a sting lesson's ring colours (#04): the proof, the sting, a cell that was safe
-const RING = { honey: C.cap, red: C.queen, safe: '#fff1c4' };
+const RING = { honey: C.cap, red: C.queen, safe: '#fff1c4', lit: '#fff1c4' };
 const FONT = 'ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif';
 
 /* A small fixed stream per cell, for shapes that must look the same from
@@ -90,6 +90,8 @@ export function createRenderer(canvas) {
     wakeAt: Infinity,            // motion off: when the showing still ends
     mode: 'play',                // tints the stung / won board
     rings: [],                   // [{ i, color }] — the sting lesson; main clears them with the sheet
+                                 // (and the bee-line hint's clues and lit target, #07)
+    ghosts: [],                  // [{ i, kind }] — the hint's implied guards, as dashed marks (#07)
     ringsAt: -1,
     lift: { from: 0, to: 0, at: -1 },   // the frame slides up so a docked sheet clears the rings
     dy: 0,                       // the lift right now
@@ -259,7 +261,7 @@ export function createRenderer(canvas) {
         hexPath(ctx, x, y, r * 1.1);
         ctx.fillStyle = col;
         ctx.shadowColor = col;
-        ctx.shadowBlur = g.color === 'safe' ? r * 0.6 : r * 0.3;
+        ctx.shadowBlur = g.color === 'safe' || g.color === 'lit' ? r * 0.6 : r * 0.3;
         ctx.fill();
         ctx.shadowBlur = 0;
       } else {
@@ -268,6 +270,26 @@ export function createRenderer(canvas) {
         ctx.lineWidth = 2.5;
         ctx.stroke();
       }
+    }
+    ctx.restore();
+  }
+
+  /* The hint's implied guards (#07): a mark's outline, dashed, on the cap:
+   * where a guard must be, not a mark the player has made. Fades in with
+   * the rings, and is simply there without motion. */
+  function ghostPass(alpha) {
+    const r = layout.r;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = C.dark;
+    ctx.lineWidth = Math.max(1.5, r * 0.09);
+    ctx.setLineDash([Math.max(2, r * 0.13), Math.max(2, r * 0.1)]);
+    for (const g of view.ghosts) {
+      const { x, y } = at(g.i), s = r * 0.34;
+      ctx.beginPath();
+      if (g.kind === MARK_Q) ctx.rect(x - s, y - s, 2 * s, 2 * s);
+      else ctx.arc(x, y, s * 1.05, 0, Math.PI * 2);
+      ctx.stroke();
     }
     ctx.restore();
   }
@@ -641,6 +663,7 @@ export function createRenderer(canvas) {
       }
     }
     if (view.rings.length) ringPass(false, ringAlpha);
+    if (view.ghosts.length) ghostPass(ringAlpha);
 
     // sweep: the number lifts, and a light runs clockwise round it
     if (sw) {
@@ -764,6 +787,7 @@ export function createRenderer(canvas) {
     view.anims.clear(); view.pins.clear();
     view.sweep = view.refusal = view.sting = view.smoke = view.pour = view.hold = null;
     view.glints = [];
+    view.ghosts = [];
     if (sprites) sprites.honey = null;
   }
 

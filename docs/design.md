@@ -144,7 +144,11 @@ Tap uncaps, or sweeps a number. Long-press (380 ms) or right-click marks,
 cycling none → guard (→ queen's guard in Apple Orchard) → none. The flag button on the
 rail makes taps mark, for anyone who finds long-press awkward. A press that
 drifts more than 12 px is dropped as a mis-touch. Keys: P / Esc to pause,
-M to switch mark mode.
+M to switch mark mode, H for the bee-line hint (Esc closes an open hint
+before it pauses). The hint (#07, `hint.js`) rings the clues of one proven
+move, then lights the move and says why; it costs +10 s and the Pure seal.
+It points near the last cell tapped or marked; with none (a fresh or resumed
+run) the smallest proof decides.
 
 ## Built (v0.0.x, 2026-09-28)
 
