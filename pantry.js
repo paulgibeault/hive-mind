@@ -23,11 +23,19 @@
  * already folded into `older` can't be found, so its frame fills a new one.
  *
  * Nothing is ever backfilled: a save from before the pantry has none.
+ *
+ * The ghost race (#11): a jar may also carry `g`, the pace of the run that
+ * set its best time (ghost.js's 38-character timeline, read back against
+ * `t`). It is written only when a clear sets the jar's best time, and only
+ * the GHOSTS newest-filled jars per hive keep one, so 600 jars still fit the
+ * budget. A jar without `g` (an old one, or one past that line) has no ghost.
  */
 
 import { boardCode } from './core.js';
+import { encode as encodeGhost, decode as decodeGhost } from './ghost.js';
 
 export const KEEP = 200;
+export const GHOSTS = 50;
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
@@ -91,7 +99,7 @@ const unpack = (hive, j) => ({
 
 /**
  * A cleared frame, into the pantry.
- *   run = { hive, seed, ms, pure, clean, hints, puffs, date }
+ *   run = { hive, seed, ms, pure, clean, hints, puffs, date, timeline? }
  * → { pantry, jar (read back), fresh: true for a new jar, false for an update }
  *
  * An update keeps the jar's number and the day it was first filled. Its time
@@ -112,15 +120,21 @@ export function addJar(p, run) {
     jar.t = Math.min(was.t, Math.round(run.ms));
     jar.d = was.d;
     if (run.pure || was.p) jar.p = 1;
+    // the ghost is the best time's pace: a new best brings its own (or none)
+    delete jar.g;
+    if (Math.round(run.ms) < was.t) setGhost(jar, run.timeline);
+    else if (was.g) jar.g = was.g;
     jars = h.jars.slice();
     jars[at] = jar;
     fresh = false;
   } else {
     pantry.made += 1;
     jar = pack(run, pantry.made);
+    setGhost(jar, run.timeline);
     jars = [...h.jars, jar];
     fresh = true;
   }
+  jars = trimGhosts(jars, jar);
   const older = { ...h.older };
   while (jars.length > KEEP) {
     const gone = jars.shift();
@@ -129,6 +143,34 @@ export function addJar(p, run) {
   }
   pantry.hives = { ...pantry.hives, [hive]: { jars, older } };
   return { pantry, jar: unpack(hive, jar), fresh };
+}
+
+function setGhost(jar, tl) {
+  const g = Array.isArray(tl) && tl[tl.length - 1] === jar.t ? encodeGhost(tl) : null;
+  if (g) jar.g = g;
+}
+
+/* Past GHOSTS timelines in a hive, the earliest-filled jars give theirs up,
+ * never the one just written. */
+function trimGhosts(jars, keep) {
+  let n = jars.reduce((k, j) => k + (j.g ? 1 : 0), 0);
+  if (n <= GHOSTS) return jars;
+  return jars.map((j) => {
+    if (n > GHOSTS && j.g && j !== keep) { n--; const { g, ...rest } = j; return rest; }
+    return j;
+  });
+}
+
+/**
+ * The ghost a frame races (#11): { ms, timeline } from its jar's best run,
+ * or null when it has no jar or its jar keeps no pace.
+ */
+export function ghostOf(p, hive, seed) {
+  const h = p && p.hives && p.hives[hive];
+  if (!h || !Array.isArray(h.jars)) return null;
+  const j = h.jars.find((x) => x && x.s === seed >>> 0);
+  const timeline = j && j.g ? decodeGhost(j.g, j.t) : null;
+  return timeline ? { ms: j.t, timeline } : null;
 }
 
 /** One hive's whole jars, read back, oldest first. */

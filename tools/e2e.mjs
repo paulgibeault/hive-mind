@@ -321,7 +321,7 @@ assert.equal(await H(() => window.__hive.reads.hints), 1);
 assert.equal(await H(() => (Arcade.stats.get('hints') || {}).clover), hintsBefore + 1, 'Arcade.stats counts hints per hive');
 // saved with the cost paid, never with the hint open
 assert.deepEqual(await H(() => { const r = Arcade.state.get('run'); return [Object.keys(r).sort(), r.reads.hints, r.ms >= 93000]; }),
-  [['daily', 'lesson', 'ms', 'reads', 's'], 1, true]);
+  [['daily', 'lesson', 'ms', 'reads', 's', 'tl'], 1, true]);   // tl: the run's pace (#11)
 await page.waitForTimeout(500);
 assert.ok(await H(() => {
   const h = window.__hive, r = h.layout.r * 0.9, sheet = document.getElementById('hint'), rail = document.getElementById('rail');
@@ -840,6 +840,124 @@ await tapCell((await provenSafe())[0]);
 await page.click('#pause'); await page.click('#quit');
 assert.equal(await page.textContent('#continue-title'), "Back to the Queen's Frame");
 assert.match(await page.textContent('#queen-title'), /^Cleared/, "a code isn't the week's frame");
+
+// ── the ghost race (#11): clear a code, replay it against its ghost ─────
+await H(() => { window.__hive.view.motion = true; });
+const race = () => H(() => window.__hive.race);
+const barShown = () => page.isVisible('#race');
+const jarGhost = (c) => H((x) => { const h = window.__hive, k = h.Core.parseCode(x); return h.Pantry.ghostOf(Arcade.stats.get('pantry'), k.hive, k.seed); }, c);
+async function openCode(c) {
+  await H(() => { document.getElementById('code-box').open = true; });
+  await page.fill('#code-in', c);
+  await page.press('#code-in', 'Enter');
+  await waitMode('play');
+}
+async function provenTaps(n) { for (let k = 0; k < n && (await mode()) === 'play'; k++) await tapCell((await provenSafe())[0]); }
+const GHOST_CODE = 'CL-000G0ST';
+// a fresh code: no jar, so no ghost, no bar, no switch on the pause sheet
+assert.equal(await jarGhost(GHOST_CODE), null);
+await openCode(GHOST_CODE);
+assert.equal((await race()).ghost, null);
+assert.equal(await barShown(), false, 'a fresh code shows no ghost');
+await page.click('#pause');
+assert.equal(await page.isVisible('#ghost-pref-row'), false);
+await page.click('#resume');
+// play half of it, take a hint (+10 s, so its pace carries the penalty), finish
+const half = Math.floor((await H(() => window.__hive.Core.safeLeft(window.__hive.s))) / 2);
+await provenTaps(half);
+const preHint = (await race()).timeline.length;
+assert.ok(preHint >= 5 && preHint < 20, `half a frame is about half the checkpoints (${preHint})`);
+await page.click('#hint-btn');
+await solverClear();
+assert.equal(await page.isVisible('#won-ghost'), false, 'no ghost, no finish line');
+const ghost1 = await jarGhost(GHOST_CODE);
+const ms1 = await H(() => Math.round(window.__hive.elapsed));
+assert.ok(ghost1, 'the clear left a pace in its jar');
+assert.equal(ghost1.timeline.length, 20);
+assert.ok(Math.abs(ghost1.ms - ms1) < 5 && ghost1.timeline[19] === ghost1.ms, 'ending at the jar time');
+assert.ok(ghost1.timeline[preHint] >= 10000, 'checkpoints after the hint carry its +10 s');
+assert.ok(ghost1.timeline[preHint - 1] < 10000, 'the ones before it do not');
+await page.click('#won-menu');
+
+// replay it and beat it: the bar shows both, and a reload mid-frame keeps the pace
+await openCode(GHOST_CODE);
+assert.deepEqual((await race()).ghost, ghost1);
+assert.equal(await barShown(), true, 'replaying a cleared frame shows the ghost');
+await provenTaps(Math.floor(half / 2));
+await page.waitForTimeout(600);
+const midRace = await race();
+assert.ok(midRace.bar.you > 0 && midRace.bar.rival > 0 && midRace.bar.ease === true, `both bars fill (${JSON.stringify(midRace.bar)})`);
+await shot('16-ghost-mid-race');
+await page.click('#pause');
+assert.equal(await page.isVisible('#ghost-pref-row'), true, 'the switch lives on the pause sheet');
+assert.equal(await page.isChecked('#ghost-pref'), true, 'on by default');
+await page.reload();
+await page.waitForFunction(() => window.__hive);
+await page.click('#continue');
+await waitMode('paused');
+assert.deepEqual((await race()).timeline, midRace.timeline, 'the pace came back with the run');
+assert.deepEqual((await race()).ghost, ghost1);
+await page.click('#resume');
+// motion off: the bar still moves with each update, it just doesn't ease
+await H(() => { window.__hive.view.motion = false; });
+const youBefore = (await race()).bar.you;
+await provenTaps(3);
+await page.waitForTimeout(550);
+const noEase = await race();
+assert.ok(noEase.bar.you > youBefore && noEase.bar.ease === false, 'motion off: updated, no easing');
+assert.equal(await page.$eval('#race', (e) => e.classList.contains('ease')), false);
+await H(() => { window.__hive.view.motion = true; });
+await solverClear();
+const ms2 = await H(() => Math.round(window.__hive.elapsed));
+assert.ok(ms2 < ghost1.ms);
+assert.match(await page.textContent('#won-ghost'), /^Beat your ghost by \d+\.\d s$/);
+assert.equal(await page.isVisible('#won-ghost'), true);
+await page.waitForTimeout(400);
+await shot('17-ghost-beaten');
+const ghost2 = await jarGhost(GHOST_CODE);
+assert.ok(Math.abs(ghost2.ms - ms2) < 5, 'beating the ghost updates the jar time');
+assert.notDeepEqual(ghost2.timeline, ghost1.timeline, 'and its pace');
+assert.ok(ghost2.timeline[19] === ghost2.ms && ghost2.timeline[preHint] < 10000, 'the new pace has no hint in it');
+await page.click('#won-menu');
+
+// replay and lose to it: two hints (+20 s); the switch hides the bar; the jar keeps the faster run
+await openCode(GHOST_CODE);
+await page.click('#pause');
+await shot('19-ghost-switch');
+await page.click('#ghost-pref-row');
+assert.equal(await page.isChecked('#ghost-pref'), false);
+assert.equal(await H(() => Arcade.state.get('prefs').ghost), false, 'remembered in prefs');
+await page.click('#resume');
+assert.equal(await barShown(), false, 'the switch hides the ghost');
+await page.click('#pause');
+await page.click('#ghost-pref-row');
+await page.click('#resume');
+assert.equal(await barShown(), true);
+await page.click('#hint-btn'); await page.click('#hint-done');
+await provenTaps(2);
+await page.click('#hint-btn'); await page.click('#hint-done');
+await solverClear();
+assert.match(await page.textContent('#won-ghost'), /^Ghost won by \d+\.\d s$/);
+await page.waitForTimeout(400);
+await shot('18-ghost-won');
+assert.deepEqual(await jarGhost(GHOST_CODE), ghost2, 'a slower clear leaves the jar and its pace alone');
+await page.click('#won-menu');
+
+// a daily: its jar has a pace (the smoked clear above), but no ghost until the day is cleared
+const td = await H(() => window.__hive.today());
+assert.ok(await H((t) => window.__hive.Pantry.ghostOf(Arcade.stats.get('pantry'), t.hive, t.seed), td));
+const dayEntry = await H((t) => Arcade.stats.get('daily')[t.date], td);
+await H((t) => Arcade.stats.update('daily', (log) => { const next = { ...log }; delete next[t.date]; return next; }), td);
+await page.click('#daily');
+await waitMode('play');
+assert.equal((await race()).ghost, null, 'a daily not yet cleared shows no ghost');
+assert.equal(await barShown(), false);
+await page.click('#pause'); await page.click('#quit');
+await H(([t, e]) => Arcade.stats.update('daily', (log) => ({ ...log, [t.date]: e })), [td, dayEntry]);
+await page.click('#daily');
+await waitMode('play');
+assert.equal(await barShown(), true, 'cleared once, its ghost races');
+await page.click('#pause'); await page.click('#quit');
 
 // landscape
 await page.click('#play');

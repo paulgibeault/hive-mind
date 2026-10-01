@@ -17,6 +17,8 @@ import * as Hint from './hint.js';
 import { honeyColour, HONEY } from './honey.js';
 import * as Pantry from './pantry.js';
 import * as Week from './week.js';
+import * as Ghost from './ghost.js';
+import { createRaceBar } from './race.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -63,7 +65,7 @@ function runClock(on) {
   if (on) { clock.resume(); if (!tickTimer) tickTimer = Arcade.session.setInterval(paintClock, 500); }
   else { clock.pause(); if (tickTimer) { tickTimer.cancel(); tickTimer = null; } }
 }
-function paintClock() { $('hud-clock').textContent = fmt(elapsed()); }
+function paintClock() { $('hud-clock').textContent = fmt(elapsed()); paintRace(); }
 
 // ── sheets ───────────────────────────────────────────────────────────────
 const SHEETS = ['menu', 'paused', 'won', 'lost', 'pantry'];
@@ -124,7 +126,7 @@ function renderHud() {
 function persistRun() {
   if (s && (s.phase === 'play' || calmable())) {
     // a stung run kept for the smoker takes its lesson along (#08)
-    Arcade.state.set('run', { s: { ...s, events: [] }, ms: elapsed(), daily, reads, lesson: s.phase === 'lost' ? lesson : null });
+    Arcade.state.set('run', { s: { ...s, events: [] }, ms: elapsed(), daily, reads, lesson: s.phase === 'lost' ? lesson : null, tl: timeline });
   }
 }
 function dropRun() { Arcade.state.set('run', null); }
@@ -135,6 +137,7 @@ function begin(state, opts = {}) {
   daily = opts.daily || null;
   base = opts.ms || 0;
   reads = opts.reads || Reads.fresh();
+  raceBegin(opts);                                   // #11
   clock.reset();
   clock.pause();
   lastTap = -1;
@@ -239,6 +242,7 @@ function recordWin() {
     });
   }
   weeklyWin(ms, pure);                               // #10: the Queen's Frame's week
+  raceFinish(ms);                                    // #11: the pace, and the ghost's line
   fillJar(ms, pure);                                 // #09: the jar, and the caption
   $('won-time').textContent = fmtExact(ms);
   $('won-best').textContent = !prev ? 'First clear' : ms < prev.value ? `New best — was ${fmtExact(prev.value)}` : `Best ${fmtExact(prev.value)}`;
@@ -298,7 +302,7 @@ function fillJar(ms, pure) {
   Arcade.stats.update('pantry', (prev) => {
     r = Pantry.addJar(prev, {
       hive: s.hive, seed: s.seed, ms, pure, clean: reads.clean, hints: reads.hints, puffs: reads.puffs,
-      date: Arcade.daily.dateStr(),
+      date: Arcade.daily.dateStr(), timeline,       // #11: kept only if this clear is the jar's best
     });
     return r.pantry;
   });
@@ -690,6 +694,70 @@ function bindHint() {
   $('hint-done').addEventListener('click', () => unhint());
 }
 
+// ── the ghost race (#11) ────────────────────────────────────────────────
+// A frame whose jar keeps a pace (pantry.js `g`) races it: the rail's race bar
+// (race.js) fills yours as you play and the ghost's at its pace, interpolated
+// at your clock. The run records its own pace as it goes (ghost.js: the
+// elapsed ms at each 5% past the opening, penalties included), saves it with
+// the run, and hands it to the jar on a win, which keeps it only if this clear
+// is its best. Both bars read only the open cells and the clock: no tells.
+// A daily shows no ghost until it has been cleared once; "Show ghost" on the
+// pause sheet (prefs.ghost, on unless set false) hides the bar and the line.
+let ghost = null;             // { ms, timeline } of the best run, or null
+let timeline = [];            // this run's pace so far; null when it can't be known
+let opening = 0;              // cells the frame's opening uncapped
+let bar = null;               // the race bar (race.js)
+
+const ghostOn = () => prefs.ghost !== false;
+
+function raceBegin(opts) {
+  opening = Ghost.openingOf(s);
+  // a saved run brings its pace; one saved before #11 with moves played can't
+  timeline = opts.timeline !== undefined ? Ghost.restore(opts.timeline)
+    : s.moves > 0 ? null : [];
+  if (timeline && s.phase === 'play') {
+    const p = Ghost.progressOf(s, opening);
+    timeline = Ghost.record(timeline, p.done, p.total, opts.ms || 0);
+  }
+  const cleared = !daily || !!dailyLog()[daily];
+  ghost = cleared ? Pantry.ghostOf(Arcade.stats.get('pantry'), s.hive, s.seed) : null;
+  $('ghost-pref').checked = ghostOn();
+  $('ghost-pref-row').hidden = !ghost;
+  $('won-ghost').hidden = true;
+}
+
+function raceNote() {
+  if (!s || !timeline) return;
+  const p = Ghost.progressOf(s, opening);
+  timeline = Ghost.record(timeline, p.done, p.total, elapsed());
+}
+
+function raceFinish(ms) {
+  timeline = timeline ? Ghost.finish(timeline, ms) : null;
+  const line = $('won-ghost');
+  line.hidden = !ghost || !ghostOn();
+  line.textContent = ghost ? Ghost.raceLine(ms, ghost.ms) : '';
+}
+
+function paintRace() {
+  if (!bar) return;
+  const on = !!s && !!ghost && ghostOn();
+  bar.show(on);
+  if (!on) return;
+  const p = Ghost.progressOf(s, opening);
+  bar.set(Ghost.fraction(p.done, p.total), Ghost.ghostAt(ghost.timeline, elapsed()), { ease: R.view.motion });
+}
+
+function bindRace() {
+  bar = createRaceBar($('race'), { rival: 'Ghost' });
+  bar.show(false);
+  $('ghost-pref').addEventListener('change', (e) => {
+    prefs = { ...prefs, ghost: e.target.checked };
+    Arcade.state.set('prefs', prefs);
+    paintRace();
+  });
+}
+
 // ── core events → everything else ────────────────────────────────────────
 // Every cue hears where the frame is ({ hive, seed, progress }), never what is
 // under a cap. `extra` is only ever what this action has just shown.
@@ -742,6 +810,7 @@ function drain(pre) {
       default: break;
     }
   }
+  raceNote();                     // #11: checkpoints this action reached
   uncapSound(events, rings);      // same tick as the rest: order here is inaudible
   renderHud();
   loop.start();
@@ -885,7 +954,7 @@ async function boot() {
     if (!run || !run.s) return openMenu();
     // never straight into a live frame; saves from before #03 carry no
     // counters (Reads.restore decides what that means for Pure)
-    begin(run.s, { ms: run.ms, daily: run.daily, reads: Reads.restore(run.reads, run.s), paused: true });
+    begin(run.s, { ms: run.ms, daily: run.daily, reads: Reads.restore(run.reads, run.s), timeline: run.tl, paused: true });
     // a stung run kept for the smoker comes back to its stung sheet (#08)
     if (calmable()) { showStung(); teach(run.lesson || null, performance.now()); }
   });
@@ -923,6 +992,7 @@ async function boot() {
     onEscape: () => !!hint && (unhint(), true),     // Esc closes the hint before it pauses
   });
   bindHint();
+  bindRace();                                        // #11
 
   new ResizeObserver(fit).observe(stage);
   fit();
@@ -944,6 +1014,7 @@ async function boot() {
       get frames() { return frames; }, get running() { return loop.running(); },
       layout: R.layout, at: R.at, view: R.view, Core, today, Pantry, honeyColour, Week, thisWeek,
     };
+    Object.defineProperty(window.__hive, 'race', { get: () => ({ ghost, timeline, bar: bar && bar.state }) });   // #11
     Object.defineProperties(window.__hive, { hint: { get: () => hint }, lastTap: { get: () => lastTap } });
   }
 

@@ -401,3 +401,48 @@ button.jar:focus-visible, button.jar[aria-pressed="true"] { outline: 2px solid v
   .sheet.dock { animation: none; }
   .jar.fill .honey, .seal-badge { animation: none; }
 }
+
+/* ── the ghost race (#11) ───────────────────────────────────────────── */
+/* race.js's rail: two thin lanes hung under the rail, clear of the frame.
+   Yours is the honey level; the rival's (the ghost) is a comb bar, one cell
+   per 5%. Motion off, the fills jump to each update instead of easing. */
+.race {
+  position: absolute;
+  left: 12px; right: 12px; bottom: -5px;
+  display: flex; flex-direction: column; gap: 2px;
+  pointer-events: none;
+}
+.race-lane { position: relative; display: block; height: 3px; overflow: hidden; border-radius: 2px; }
+.race-lane i { position: absolute; inset: 0; transform-origin: left center; transform: scaleX(0); }
+.race-lane.you { background: rgba(246, 234, 210, 0.08); }
+.race-lane.you i { background: linear-gradient(90deg, var(--honey-deep), var(--honey)); }
+.race-lane.rival {
+  background: rgba(246, 234, 210, 0.10);
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 calc(5% - 2px), transparent calc(5% - 2px) 5%);
+  mask: repeating-linear-gradient(90deg, #000 0 calc(5% - 2px), transparent calc(5% - 2px) 5%);
+}
+.race-lane.rival i { background: rgba(246, 234, 210, 0.6); }
+.race.behind .race-lane.rival i { background: rgba(246, 234, 210, 0.85); }
+.race.ease .race-lane i { transition: transform 0.5s linear; }
+@media (max-width: 420px) { .race { left: 8px; right: 8px; } }
+
+.ghost-line { margin: 0; font-size: 15px; color: var(--ink); }
+
+/* a switch row (the pause sheet's "Show ghost") */
+.switch {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 52px; padding: 8px 14px;
+  border: 1px solid var(--line); border-radius: 14px;
+  cursor: pointer; position: relative;
+}
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.switch-words { flex: 1; display: flex; flex-direction: column; line-height: 1.25; font-weight: 600; }
+.switch-words small { font-weight: 400; font-size: 13px; color: var(--ink-dim); }
+.switch-knob { flex: none; width: 44px; height: 26px; border-radius: 13px; background: rgba(246, 234, 210, 0.16); position: relative; }
+.switch-knob::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--ink-dim);
+}
+.switch input:checked ~ .switch-knob { background: var(--honey); }
+.switch input:checked ~ .switch-knob::after { left: 21px; background: #2a1d10; }
+.switch input:focus-visible ~ .switch-knob { outline: 2px solid var(--honey); outline-offset: 2px; }
