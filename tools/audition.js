@@ -10,7 +10,7 @@
 
 (function (global) {
   const A = global.ArcadeAudition;
-  const HIVES = ['clover', 'apple', 'wildflowers'];
+  const HIVES = ['clover', 'apple', 'wildflowers', 'queen'];
   const P = (o) => Object.assign({ hive: 'clover', seed: 1, progress: 0.4, step: 2, variant: 0, vseed: 101 }, o);
   const one = (cue, label, params) => A.play(cue, { label, params: P(params) });
   const fire = (ctx, bus, cue, t, r, params) => A.fire(ctx, bus, cue, t, r, P(params));

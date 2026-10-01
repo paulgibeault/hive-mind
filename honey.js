@@ -12,8 +12,8 @@
  *   wildflowers   no two alike     two tones from the seed: hue 18–40°, lightness 24–56%
  *   queen         dark, royal      #5a2c0e → #3a1c08 (the Queen's Frame, #10)
  *
- * `queen` is the id #10 will give the Queen's Frame. Nothing here makes that
- * hive exist; it only means its jar has a colour the day it does.
+ * `queen` is the Queen's Frame, the weekly hive (#10): its jars are royal
+ * honey, the same dark pair for every week.
  *
  * Colour shows only after a win: honey is what a cleared frame gives, so
  * nothing here is ever asked about a frame still in play.

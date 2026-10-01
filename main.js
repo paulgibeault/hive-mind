@@ -16,6 +16,7 @@ import * as Reads from './reads.js';
 import * as Hint from './hint.js';
 import { honeyColour, HONEY } from './honey.js';
 import * as Pantry from './pantry.js';
+import * as Week from './week.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -161,7 +162,7 @@ function bump(hiveId, field) {
 }
 
 function newFrame() {
-  startFrame(Core.HIVES[prefs.hive].id, (Math.random() * 0x100000000) >>> 0);
+  startFrame(chosenHive().id, (Math.random() * 0x100000000) >>> 0);
 }
 
 // ── the daily frame ──────────────────────────────────────────────────────
@@ -170,7 +171,8 @@ function newFrame() {
 function today() {
   const date = Arcade.daily.dateStr();
   const day = Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000);
-  const hive = Core.HIVES[((day % 3) + 3) % 3].id;
+  const n = Core.PICKABLE.length;                    // never the hidden Queen's Frame (#10)
+  const hive = Core.PICKABLE[((day % n) + n) % n].id;
   const seed = Arcade.daily.seed().int(0, 0xfffffffe) >>> 0;
   return { date, hive, seed };
 }
@@ -198,11 +200,12 @@ function paintDaily() {
 
 // ── records ──────────────────────────────────────────────────────────────
 function renderBest() {
-  const hive = Core.HIVES[prefs.hive];
+  const hive = chosenHive();
   const best = Arcade.records.get(`time-${hive.id}`);
   const k = (Arcade.stats.getOrInit('frames', {})[hive.id]) || { played: 0, won: 0 };
   paintDaily();
   paintPantryStrip();                                // #09
+  paintQueen();                                      // #10
   const bits = [];
   if (best) bits.push(`${hive.name} best ${fmtExact(best.value)}`);
   if (k.played) bits.push(`${k.won} of ${k.played} cleared`);
@@ -235,6 +238,7 @@ function recordWin() {
       return { ...log, [date]: { ...best, pure: pure || !!(was && was.pure) } };
     });
   }
+  weeklyWin(ms, pure);                               // #10: the Queen's Frame's week
   fillJar(ms, pure);                                 // #09: the jar, and the caption
   $('won-time').textContent = fmtExact(ms);
   $('won-best').textContent = !prev ? 'First clear' : ms < prev.value ? `New best — was ${fmtExact(prev.value)}` : `Best ${fmtExact(prev.value)}`;
@@ -253,17 +257,13 @@ function recordWin() {
 // hive buttons, the pantry sheet and the won sheet; the daily strip draws the
 // month as comb. All of it is after a win or outside play: honey colour is
 // never shown for a frame still being played.
-const QUEEN = { id: 'queen', name: "Queen's Frame" };    // #10's hive, until core has it
 const JAR_CLINK_MS = 1100;          // the won sheet's jar has filled: it clinks
 const SVGNS = 'http://www.w3.org/2000/svg';
 let picked = null;                  // the jar the pantry's detail card shows
 let clink = null;
 
 const pantryNow = () => Pantry.normalize(Arcade.stats.get('pantry'));
-const shelfHives = () => {
-  const list = Core.HIVES.map((h) => ({ id: h.id, name: h.name }));
-  return list.some((h) => h.id === QUEEN.id) ? list : [...list, QUEEN];
-};
+const shelfHives = () => Core.HIVES;                // every hive has a shelf, the Queen's Frame's too (#10)
 const hiveName = (id) => (shelfHives().find((h) => h.id === id) || { name: id }).name;
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const jarLabel = (j) => [hiveName(j.hive), Pantry.shortDate(j.date), fmt(j.ms), j.pure && 'pure'].filter(Boolean).join(', ');
@@ -376,7 +376,7 @@ function paintPantryStrip() {
 function paintHiveJars() {
   const p = pantryNow();
   [...$('hive').children].forEach((b, i) => {
-    b.querySelector('.jars span').textContent = plural(Pantry.countsOf(p, Core.HIVES[i].id).jars, 'jar');
+    b.querySelector('.jars span').textContent = plural(Pantry.countsOf(p, Core.PICKABLE[i].id).jars, 'jar');
   });
 }
 
@@ -424,7 +424,7 @@ function openPantry() {
       e.className = 'slot-empty';
       const words = document.createElement('span');
       words.className = 'empty-note';
-      words.textContent = h.id === QUEEN.id ? 'The weekly frame. Its jar waits here.' : 'No jars yet.';
+      words.textContent = h.hidden ? 'The weekly frame. Its jar waits here.' : 'No jars yet.';
       shelf.append(e, words);
     }
     box.append(head, shelf);
@@ -489,6 +489,50 @@ function bindPantry(openMenu) {
   $('detail-replay').addEventListener('click', () => { if (picked) startFrame(picked.hive, picked.seed); });
   $('detail-send').addEventListener('click', () => { if (picked) sendJar(picked.code); });
 }
+
+// ── the Queen's Frame (#10) ─────────────────────────────────────────────
+// The weekly stacked hive (core.js `queen`, hidden from the hive selector and
+// the daily) opens from its own menu strip. week.js names the frame week —
+// Sunday 00:00 local to the next Sunday — and its seed, from the local date,
+// so the same week is the same frame on every device. Arcade.stats('weekly')
+// keeps each week's best clear, { 'YYYY-Www': { ms, pure } }; the records
+// (time-queen, pure-time-queen) and the royal jar come from recordWin.
+const thisWeek = () => Week.thisWeek(Arcade.daily.dateStr());
+const weeklyLog = () => Arcade.stats.getOrInit('weekly', {});
+/** The hive the selector has picked: a pickable one, whatever prefs held. */
+const chosenHive = () => Core.PICKABLE[prefs.hive] || Core.PICKABLE[0];
+
+function paintQueen() {
+  const w = thisWeek();
+  const done = weeklyLog()[w.week];
+  const next = Week.nextFrameWords(w.daysLeft);
+  $('queen-title').textContent = done ? `Cleared · ${fmtExact(done.ms)}` : 'Open all week';
+  $('queen-line').textContent = done ? (done.pure ? 'Sealed Pure.' : 'Replay it for the Pure seal.')
+    : 'Both kinds of guard, on broken comb.';
+  $('queen-next').textContent = next;
+  $('queen-strip').classList.toggle('done', !!done);
+  // its jar, once this week's is filled; an empty slot until then
+  const slot = $('queen-jar');
+  if (done) slot.replaceChildren(jarEl('queen', w.seed, { cls: 'mini', pure: done.pure }));
+  else { const e = document.createElement('span'); e.className = 'slot-empty mini'; slot.replaceChildren(e); }
+  $('queen-strip').setAttribute('aria-label', `Queen's Frame, opens Sundays. ${done
+    ? `This week's is cleared in ${fmtExact(done.ms)}${done.pure ? ', sealed Pure' : ''}.` : 'Open all week.'} ${next}.`);
+}
+
+/* A Queen's Frame cleared: the week it was dealt keeps its best clear. A QU-
+ * code from any other week is a frame like any other. */
+function weeklyWin(ms, pure) {
+  if (s.hive !== 'queen') return;
+  const week = Week.weekOf(s.seed, Arcade.daily.dateStr());
+  if (!week) return;
+  Arcade.stats.update('weekly', (log) => {
+    const was = log && log[week];
+    const best = was && was.ms <= ms ? was : { ms };
+    return { ...log, [week]: { ...best, pure: pure || !!(was && was.pure) } };
+  });
+}
+
+function openQueen() { startFrame('queen', thisWeek().seed); }
 
 // ── the sting lesson (#04) ──────────────────────────────────────────────
 // Shown only after a sting, from what was known before the tap: the card on
@@ -739,7 +783,7 @@ function pause() {
 // ── sizing & settings ────────────────────────────────────────────────────
 function fit() {
   const r = stage.getBoundingClientRect();
-  const hive = s ? s : Core.HIVES[prefs.hive];
+  const hive = s ? s : chosenHive();
   R.resize(Math.max(1, r.width), Math.max(1, r.height), hive.cols, hive.rows, 56);
   if (mode === 'lost' && s) placeLesson(-1);
   if (hint) placeLesson(-1, $('hint'));
@@ -800,13 +844,14 @@ async function boot() {
   migrateStored();
 
   prefs = { ...prefs, ...(Arcade.state.get('prefs') || {}) };
+  if (!Core.PICKABLE[prefs.hive]) prefs.hive = 0;    // only a pickable hive is ever selected (#10)
   clock = Arcade.session.start();
   clock.pause();
   loop = Arcade.loop(frame);
   applySettings();
   Arcade.onSettingsChange(() => { applySettings(); kick(); });
 
-  const paintHive = segmented($('hive'), Core.HIVES, () => prefs.hive, (i) => {
+  const paintHive = segmented($('hive'), Core.PICKABLE, () => prefs.hive, (i) => {
     prefs.hive = i;
     Arcade.state.set('prefs', prefs);
     renderBest();
@@ -821,7 +866,8 @@ async function boot() {
     if (live) {
       const hive = Core.hiveById(run.s.hive);
       $('continue-note').textContent = `${stung ? 'Stung' : 'In the smoker'} · ${fmt(run.ms || 0)}`;
-      $('continue-title').textContent = run.daily ? `Back to the daily ${hive.name}` : `Back to the ${hive.name} frame`;
+      $('continue-title').textContent = run.daily ? `Back to the daily ${hive.name}`
+        : hive.hidden ? `Back to the ${hive.name}` : `Back to the ${hive.name} frame`;
     }
     paintHive(); renderBest(); paintHiveJars();
     unteach();
@@ -862,6 +908,7 @@ async function boot() {
   $('lost-menu').addEventListener('click', () => { dropRun(); openMenu(); });
   $('puff').addEventListener('click', puff);
   bindPantry(openMenu);                              // #09
+  $('queen-strip').addEventListener('click', openQueen);   // #10
 
   input = bindInput($('view'), {
     active: () => mode === 'play',
@@ -886,6 +933,7 @@ async function boot() {
   Arcade.onStateReplaced(() => {
     migrateStored();
     prefs = { hive: 0, ...(Arcade.state.get('prefs') || {}) };
+    if (!Core.PICKABLE[prefs.hive]) prefs.hive = 0;
     openMenu();
   });
 
@@ -894,7 +942,7 @@ async function boot() {
     window.__hive = {
       get s() { return s; }, get mode() { return mode; }, get elapsed() { return elapsed(); }, get reads() { return reads; }, get lesson() { return lesson; },
       get frames() { return frames; }, get running() { return loop.running(); },
-      layout: R.layout, at: R.at, view: R.view, Core, today, Pantry, honeyColour,
+      layout: R.layout, at: R.at, view: R.view, Core, today, Pantry, honeyColour, Week, thisWeek,
     };
     Object.defineProperties(window.__hive, { hint: { get: () => hint }, lastTap: { get: () => lastTap } });
   }

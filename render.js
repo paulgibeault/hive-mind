@@ -215,7 +215,10 @@ export function createRenderer(canvas) {
   function resize(w, h, cols, rows, top) {
     const dpr = Math.min(3, window.devicePixelRatio || 1);
     const pad = 10;
-    const availW = w - pad * 2, availH = h - top - pad * 2;
+    // a phone-width frame is width-bound: its side margins give way so a
+    // 9-wide frame's cells stay ≥ 40 px across at 390 px (#10)
+    const side = w < 480 ? 4 : pad;
+    const availW = w - side * 2, availH = h - top - pad * 2;
     const r = Math.max(8, Math.min(availW / (Math.sqrt(3) * (cols + 0.5)), availH / (1.5 * rows + 0.5)));
     const e = extent(cols, rows, r);
     Object.assign(layout, {

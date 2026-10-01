@@ -534,7 +534,7 @@ for (let k = 1; k <= 3; k++) {
   await page.click('#play');
   await waitMode('play');
   const id = await H(() => window.__hive.s.hive);
-  assert.equal(id, await H((n) => window.__hive.Core.HIVES[n].id, k - 1));
+  assert.equal(id, await H((n) => window.__hive.Core.PICKABLE[n].id, k - 1));
   await clearFrame();
   const r = await H((c) => Arcade.records.get(c), `time-${id}`);
   assert.ok(r && r.value > 0, `time-${id}`);
@@ -755,6 +755,91 @@ await page.click('#pantry-open');
 await waitMode('pantry');
 await page.keyboard.press('Escape');
 await waitMode('menu');
+
+// ── the Queen's Frame (#10): open it from its strip, clear it, a royal jar ──
+await H(() => { window.__hive.view.motion = true; });
+await page.waitForTimeout(2500);                   // the Send toast goes, for the shots
+assert.equal(await page.$$eval('#hive button', (b) => b.length), 3, 'the hive selector never offers it');
+const wk = await H(() => window.__hive.thisWeek());
+assert.match(wk.week, /^\d{4}-W\d\d$/);
+assert.equal(await H(() => window.__hive.today().hive === 'queen'), false, 'nor does the daily');
+assert.equal(await page.textContent('#queen-strip .eyebrow'), "Queen's Frame · Sundays");
+assert.equal(await page.textContent('#queen-title'), 'Open all week');
+assert.equal(await page.textContent('#queen-next'), await H((n) => window.__hive.Week.nextFrameWords(n), wk.daysLeft));
+assert.deepEqual(await page.$$eval('#queen-jar > *', (e) => e.map((x) => x.className)), ['slot-empty mini'], 'an empty slot until it is cleared');
+assert.ok((await page.$eval('#queen-strip', (b) => b.getBoundingClientRect().height)) >= 40, 'the strip is a 40 px target');
+await page.$eval('#queen-strip', (b) => b.scrollIntoView({ block: 'center' }));
+await page.waitForTimeout(100);
+await shot('16-queen-strip-open');
+await page.click('#queen-strip');
+await waitMode('play');
+assert.deepEqual(await H(() => { const s = window.__hive.s; return [s.hive, s.seed, s.cols, s.rows, s.puffs]; }),
+  ['queen', wk.seed, 9, 20, 2], "this week's frame, on the week's seed");
+assert.equal(await page.textContent('#hud-hive'), "Queen's Frame");
+// tap targets at 390 × 844: every cell is ≥ 40 px across its flats, and the
+// whole frame is on screen
+const geo = await H(() => {
+  const h = window.__hive, r = h.layout.r, n = h.s.cols * h.s.rows;
+  const pts = Array.from({ length: n }, (_, i) => h.at(i));
+  return { across: Math.sqrt(3) * r, tall: 2 * r, minX: Math.min(...pts.map((p) => p.x)) - Math.sqrt(3) * r / 2,
+    maxX: Math.max(...pts.map((p) => p.x)) + Math.sqrt(3) * r / 2, maxY: Math.max(...pts.map((p) => p.y)) + r, W: innerWidth, Hh: innerHeight };
+});
+assert.ok(geo.across >= 40, `cells are ${geo.across.toFixed(1)} px across`);
+assert.ok(geo.minX >= 0 && geo.maxX <= geo.W && geo.maxY <= geo.Hh, `the frame fits: ${JSON.stringify(geo)}`);
+// and the pointer agrees: a tap 19.5 px either side of a cell's centre lands on that cell
+{
+  const [a, b] = await provenSafe();
+  for (const [i, dx] of [[a, 19.5], [b, -19.5]]) {
+    if (await H((k) => window.__hive.s.open[k], i)) continue;
+    const p = await xy(i);
+    await page.mouse.click(p.x + dx, p.y);
+    assert.equal(await H((k) => window.__hive.s.open[k], i), 1, `a tap ${dx} px off ${i}'s centre opens it`);
+  }
+}
+for (let k = 0; k < 8; k++) await tapCell((await provenSafe())[0]);
+await page.waitForTimeout(400);
+await shot('17-queen-play');
+await solverClear();
+assert.equal(await page.isVisible('#won-pure'), true, 'a solver-driven clear is Pure');
+assert.match(await page.textContent('#won-note'), /^Pure · jar \d+ · royal honey$/);
+assert.deepEqual(await H(() => [...document.querySelectorAll('#won-jar .jar')].map((j) => j.style.getPropertyValue('--top'))),
+  [await H(() => window.__hive.honeyColour('queen', 1).top)]);
+const qRec = await H(() => [Arcade.records.get('time-queen'), Arcade.records.get('pure-time-queen')]);
+assert.ok(qRec[0] && qRec[0].value > 0 && qRec[0].label === "Queen's Frame — fastest frame", 'time-queen');
+assert.ok(qRec[1] && qRec[1].value === qRec[0].value, 'pure-time-queen');
+assert.deepEqual(await H((w) => Arcade.stats.get('weekly')[w], wk.week), { ms: qRec[0].value, pure: true }, "the week's best clear");
+await page.waitForTimeout(1300);
+await shot('18-queen-won');
+await page.click('#won-menu');
+// the strip: cleared, its time and seal, and its jar
+assert.match(await page.textContent('#queen-title'), /^Cleared · [\d.:s]+$/);
+assert.equal(await page.textContent('#queen-line'), 'Sealed Pure.');
+assert.equal(await page.$$eval('#queen-jar .jar .wax', (e) => e.length), 1, 'a royal jar, sealed');
+assert.match(await page.getAttribute('#queen-strip', 'aria-label'), /^Queen's Frame, opens Sundays\. This week's is cleared in .+, sealed Pure\. New/);
+await page.$eval('#queen-strip', (b) => b.scrollIntoView({ block: 'center' }));
+await page.waitForTimeout(100);
+await shot('19-queen-strip-cleared');
+// the pantry: the Queen's Frame shelf has its jar, and the empty slot is gone
+await page.click('#pantry-open');
+await waitMode('pantry');
+assert.equal(await page.$$eval('.shelf-box:nth-child(4) .slot-empty', (e) => e.length), 0);
+assert.deepEqual(await page.$$eval('.shelf-box:nth-child(4) button.jar', (j) => j.map((b) => b.getAttribute('aria-label').split(',')[0])), ["Queen's Frame"]);
+assert.match(await page.textContent('#detail-note'), /^Queen's Frame · /, 'the newest jar is picked');
+await page.evaluate(() => { document.querySelector('.shelf-box:nth-child(4)').scrollIntoView(); });
+await page.waitForTimeout(200);
+await shot('20-pantry-royal');
+await page.keyboard.press('Escape');
+await waitMode('menu');
+// a QU- code plays the queen hive (not as the week's, unless it is the week's seed)
+await H(() => { document.getElementById('code-box').open = true; });
+await page.fill('#code-in', 'qu-00abc12');
+await page.press('#code-in', 'Enter');
+await waitMode('play');
+assert.deepEqual(await H(() => [window.__hive.s.hive, window.__hive.s.seed]), ['queen', parseInt('abc12', 36)]);
+await tapCell((await provenSafe())[0]);
+await page.click('#pause'); await page.click('#quit');
+assert.equal(await page.textContent('#continue-title'), "Back to the Queen's Frame");
+assert.match(await page.textContent('#queen-title'), /^Cleared/, "a code isn't the week's frame");
 
 // landscape
 await page.click('#play');

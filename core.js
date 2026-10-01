@@ -11,6 +11,12 @@
  *   wildflowers  one kind, but some comb is BROKEN: safe, but it tells you
  *                nothing. The break is drawn once it is uncapped, never before.
  *
+ * and one that stacks two of them, played once a week (#10):
+ *   queen        the Queen's Frame: Apple Orchard's two kinds on Wildflowers'
+ *                broken comb, a little larger. Hidden from the hive selector;
+ *                main.js opens it from its own strip, on the week's seed
+ *                (week.js), and its QU- codes play anywhere.
+ *
  * Every frame is fixed by (hive, seed) and ships with its OPENING already
  * uncapped. The generator keeps only frames the solver (solver.js) can
  * finish from that opening by logic alone — there is never a forced guess —
@@ -23,10 +29,15 @@ import { neighbours } from './hex.js';
 import { solve, provenNow as provenFrom, minimalProof as proofFrom, SAFE, GUARD, QUEEN } from './solver.js';
 
 // `puffs`: how many times the smoker can calm a sting in one frame (#08).
+// `hidden`: not offered by the hive selector or the daily rotation (#10);
+// it still generates, plays, records and parses like any other hive. Hives
+// are only ever appended: the hive id is not in the RNG, so a new one never
+// moves another hive's frames.
 export const HIVES = [
   { id: 'clover',      name: 'Clover Field',  cols: 8, rows: 15, guards: 23, queens: 0,  broken: 0, puffs: 1 },
   { id: 'apple',       name: 'Apple Orchard', cols: 9, rows: 18, guards: 18, queens: 13, broken: 0, puffs: 1 },
   { id: 'wildflowers', name: 'Wildflowers',   cols: 9, rows: 18, guards: 26, queens: 0,  broken: 12, puffs: 1 },
+  { id: 'queen',       name: "Queen's Frame", cols: 9, rows: 20, guards: 21, queens: 12, broken: 10, puffs: 2, hidden: true },
 ];
 
 // The hives' ids before 2026-09-28. Saves, records and codes from then still
@@ -34,10 +45,18 @@ export const HIVES = [
 export const OLD_IDS = Object.freeze({ meadow: 'clover', orchard: 'apple', wild: 'wildflowers' });
 const current = (id) => (Object.hasOwn(OLD_IDS, id) ? OLD_IDS[id] : id);
 export const hiveById = (id) => HIVES.find((h) => h.id === current(id)) || HIVES[0];
+/** The hives a player picks from (the selector, the daily): every one not hidden. */
+export const PICKABLE = HIVES.filter((h) => !h.hidden);
 
 // Sizes fill a portrait phone (the frame is width-bound at 8–9 cells across).
 // Densities (~19%) are first guesses, set so a fair frame still turns up in a
 // handful of tries (a millisecond or two); tune them by playtest.
+// The Queen's Frame is 9 × 20, not 10 wide: ten columns drop a cell under
+// the 40 px tap target on a 390 px phone. Its 21 + 12 guards (18.3%) on 10
+// broken cells were measured with the tries test (tests/core.test.js):
+// 22 + 12 needed a median of 11 tries and up to 107, 21 + 12 a median of 8
+// and up to 89 — the extra hardness wasn't worth twice the worst case on a
+// phone.
 
 // a cell's contents
 export const EMPTY = 0, G = 1, Q = 2;

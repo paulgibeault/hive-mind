@@ -11,7 +11,7 @@
 // silence.
 //
 // Hive Mind has no build step: index.html, the ES modules (main, core, hex, juice,
-// solver, reads, hint, honey, pantry, migrate, render, input, audio, mixer,
+// solver, reads, hint, honey, pantry, week, migrate, render, input, audio, mixer,
 // arcade-rng), soundpack.js, style.css, the manifest, sw.js and the
 // two icons are the whole artifact. Both icons ship — icon.svg is what
 // index.html and manifest.json name, icon.png is the launcher's card art
