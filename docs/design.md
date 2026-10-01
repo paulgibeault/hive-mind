@@ -188,8 +188,10 @@ and a sting costs time as in Race.
 ### Other owed work
 - **Playtest tuning**: densities per hive, long-press timing, and how much
   broken comb Wildflowers wants (decision 4 above).
-- **Sound**: audition the pack on the launcher's soundpack workbench before
-  deciding it's done (see the fleet sound-pack notes).
+- **Sound**: the sound pass (#06) is rendered on the launcher's soundpack
+  workbench (`tools/soundpack.config.json`, `tools/audition.js`) and levelled
+  against `won` (`tools/sound-levels.mjs`); it still owes Paul's ten-minute
+  listening test and a phone-speaker pass.
 - **Juice, optional**: a sting could collapse the frame into sand with the
   `Arcade.sim.sand` kernel. It's decoration and waits until the modes exist.
 - **A stacked hive** (broken Apple Orchard) and a **"hint" that explains** the

@@ -1,0 +1,7 @@
+{
+  "name": "hive-mind",
+  "pack": "../soundpack.js",
+  "auditions": { "full": "audition.js" },
+  "out": "../audio-out",
+  "sampleRate": 48000
+}
