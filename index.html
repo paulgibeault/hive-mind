@@ -25,7 +25,7 @@
     <header class="rail" id="rail" hidden>
       <div class="rail-id">
         <span class="mono eyebrow" id="hud-hive">Clover Field</span>
-        <span class="mono code" id="hud-code"></span>
+        <span class="mono reads" id="hud-reads"></span>
       </div>
       <div class="rail-count" id="hud-count" aria-live="polite"></div>
       <span class="mono clock" id="hud-clock">0:00</span>
@@ -87,14 +87,22 @@
     <section class="sheet small" id="paused" hidden>
       <h2>Smoke's out</h2>
       <p class="lede">The clock is stopped.</p>
+      <p class="mono code-line">Frame <b id="paused-code"></b></p>
       <button class="primary" id="resume" type="button">Back to the frame</button>
       <button class="ghost" id="quit" type="button">Leave the hive</button>
     </section>
 
     <section class="sheet dock" id="won" hidden>
       <span class="mono eyebrow" id="won-note"></span>
-      <h2>Honey taken</h2>
+      <div class="won-head">
+        <h2>Honey taken</h2>
+        <span class="seal" id="won-pure" hidden>
+          <svg viewBox="0 0 40 44" aria-hidden="true"><path d="M20 2l17 10v20L20 42 3 32V12z" fill="#c9801a"/><path d="M20 6.5l13.2 7.7v15.6L20 37.5 6.8 29.8V14.2z" fill="#f2b33d" stroke="#2a1d10" stroke-opacity=".35" stroke-width="1.4"/><path d="M13 22.5l5 5 9-10" fill="none" stroke="#2a1d10" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Pure</span>
+        </span>
+      </div>
       <p class="result mono"><span id="won-time"></span><span class="result-best" id="won-best"></span></p>
+      <p class="mono reads-line" id="won-reads"></p>
       <p class="mono code-line">Frame <b id="won-code"></b></p>
       <div class="row">
         <button class="primary" id="again" type="button">New frame</button>

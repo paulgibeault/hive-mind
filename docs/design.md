@@ -85,9 +85,12 @@ again until nothing more follows.
    streak.
 6. **Records**: `time-<hive>`, the fastest clear per hive (`duration-ms`,
    lower is better), which the launcher's Records sheet renders. Played/won
-   counts go in `Arcade.stats('frames')`.
+   counts go in `Arcade.stats('frames')`. Since #03, a **Pure** clear (no
+   lucky uncaps, hints or smoke) also sets `pure-time-<hive>`, bumps a `pure`
+   count in the same stat, and marks the daily entry `pure: true`.
 7. **Frame codes** (`AP-0000ABC`): the hive plus the seed in base 36, shown on
-   the rail and on the win sheet, and typed into the menu. This is racing
+   the pause and win sheets (the rail's second line is the clean-read count
+   since #03), and typed into the menu. This is racing
    before the network exists: say the code aloud and both start.
 
 ## Decisions — 2026-09-28 (design review)

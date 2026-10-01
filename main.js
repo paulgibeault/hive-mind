@@ -12,6 +12,7 @@ import { createRenderer } from './render.js';
 import { bindInput } from './input.js';
 import { initAudio, sfx, sfxReset, cueContext } from './audio.js';
 import { refused } from './juice.js';
+import * as Reads from './reads.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -40,6 +41,7 @@ let wake = null;              // a resting loop's one more frame, for a still th
 let input = null;
 let frames = 0;               // frames drawn, for test drivers checking the loop rests
 let tickTimer = null;
+let reads = Reads.fresh();    // this run's { clean, lucky, hints, puffs } (#03)
 
 // ── time ─────────────────────────────────────────────────────────────────
 const elapsed = () => base + (clock ? clock.elapsedMs() : 0);
@@ -100,7 +102,9 @@ function renderHud() {
   if (!s) return;
   const hive = Core.hiveById(s.hive);
   $('hud-hive').textContent = daily ? `Daily · ${hive.name}` : hive.name;
-  $('hud-code').textContent = Core.boardCode(s.hive, s.seed);
+  $('hud-reads').textContent = Reads.railLine(reads);
+  $('hud-reads').classList.toggle('pure', Reads.isPure(reads));
+  $('paused-code').textContent = Core.boardCode(s.hive, s.seed);
   const count = $('hud-count');
   count.textContent = '';
   const pill = (left, cls) => {
@@ -125,7 +129,7 @@ function renderHud() {
 // ── runs ─────────────────────────────────────────────────────────────────
 function persistRun() {
   if (s && s.phase === 'play') {
-    Arcade.state.set('run', { s: { ...s, events: [] }, ms: elapsed(), daily });
+    Arcade.state.set('run', { s: { ...s, events: [] }, ms: elapsed(), daily, reads });
   }
 }
 function dropRun() { Arcade.state.set('run', null); }
@@ -135,6 +139,7 @@ function begin(state, opts = {}) {
   s.events = [];
   daily = opts.daily || null;
   base = opts.ms || 0;
+  reads = opts.reads || Reads.fresh();
   clock.reset();
   clock.pause();
   markMode = false;
@@ -151,10 +156,10 @@ function startFrame(hiveId, seed, opts = {}) {
   persistRun();
 }
 
-// per hive: { played, won }
+// per hive: { played, won, pure }
 function bump(hiveId, field) {
   Arcade.stats.update('frames', (prev) => {
-    const k = { played: 0, won: 0, ...(prev && prev[hiveId]) };
+    const k = { played: 0, won: 0, pure: 0, ...(prev && prev[hiveId]) };
     return { ...prev, [hiveId]: { ...k, [field]: k[field] + 1 } };
   });
 }
@@ -214,17 +219,33 @@ function recordWin() {
     value: ms, direction: 'lower', format: 'duration-ms', label: `${hive.name} — fastest frame`,
   });
   bump(hive.id, 'won');
+  // Pure: no lucky uncaps, no hints, no smoke (#03). Its own record and count.
+  const pure = Reads.isPure(reads);
+  if (pure) {
+    Arcade.records.best(`pure-time-${hive.id}`, {
+      value: ms, direction: 'lower', format: 'duration-ms', label: `${hive.name} — fastest Pure frame`,
+    });
+    bump(hive.id, 'pure');
+  }
   let note = '';
   if (daily) {
+    // the day keeps its fastest clear; `pure` says whether any clear that
+    // day was Pure
     const date = daily;
-    Arcade.stats.update('daily', (log) => (log && log[date] && log[date].ms <= ms
-      ? log : { ...log, [date]: { ms, hive: hive.id } }));
+    Arcade.stats.update('daily', (log) => {
+      const was = log && log[date];
+      const best = was && was.ms <= ms ? was : { ms, hive: hive.id };
+      return { ...log, [date]: { ...best, pure: pure || !!(was && was.pure) } };
+    });
     note = `Daily frame · ${daily}`;
   } else note = hive.name;
   $('won-note').textContent = note;
   $('won-time').textContent = fmtExact(ms);
   $('won-best').textContent = !prev ? 'First clear' : ms < prev.value ? `New best — was ${fmtExact(prev.value)}` : `Best ${fmtExact(prev.value)}`;
   $('won-code').textContent = Core.boardCode(s.hive, s.seed);
+  const total = reads.clean + reads.lucky;
+  $('won-reads').textContent = `${reads.clean} of ${total} clean · ${reads.hints} hints · ${reads.puffs} puffs`;
+  $('won-pure').hidden = !pure;
 }
 
 // ── core events → everything else ────────────────────────────────────────
@@ -251,6 +272,7 @@ function drain() {
     switch (e.type) {
       case 'uncap':
         rings = Math.max(rings, R.uncapped(e, now));
+        if (e.proven) R.glint(e.cell, now);          // a clean read (#03)
         break;
       case 'mark': R.marked(e.cell, e.mark, now); sfx(e.mark ? 'mark' : 'unmark', cue({ kind: e.mark })); break;
       case 'sting':
@@ -282,16 +304,28 @@ function drain() {
 
 function act(fn, i) {
   if (mode !== 'play' || !s) return;
+  // Clean reads (#03): name what the tap would uncap and what the clues
+  // proved, both BEFORE the move. One provenNow per tap; marks skip it.
+  const move = fn === Core.tap ? Reads.moveAt(s, i) : null;
+  const proven = move ? Core.provenNow(s) : null;
   const sweeping = fn === Core.tap && !!s.open[i];
-  if (fn(s, i)) {
-    if (sweeping) R.swept(i, performance.now());   // before its uncaps, which follow its light
-    drain(); persistRun();
-  } else if (sweeping && refused(s, Core.nbrsOf(s.cols, s.rows), i)) {
-    // the marks round it don't add up: the number shakes and knocks
-    R.refused(i, performance.now());
-    sfx('nope', cue());
-    kick();
+  if (!fn(s, i)) {
+    if (sweeping && refused(s, Core.nbrsOf(s.cols, s.rows), i)) {
+      // the marks round it don't add up: the number shakes and knocks
+      R.refused(i, performance.now());
+      sfx('nope', cue());
+      kick();
+    }
+    return;
   }
+  if (move && s.phase !== 'lost') {
+    const verdict = Reads.classify(move, proven);
+    reads = Reads.tally(reads, verdict);
+    for (const e of s.events) if (e.type === 'uncap') e.proven = verdict === 'clean';
+  }
+  if (sweeping) R.swept(i, performance.now());     // before its uncaps, which follow its light
+  drain();
+  persistRun();
 }
 
 function pause() {
@@ -394,7 +428,9 @@ async function boot() {
   $('continue').addEventListener('click', () => {
     const run = Arcade.state.get('run');
     if (!run || !run.s) return openMenu();
-    begin(run.s, { ms: run.ms, daily: run.daily, paused: true });   // never straight into a live frame
+    // never straight into a live frame; saves from before #03 carry no
+    // counters (Reads.restore decides what that means for Pure)
+    begin(run.s, { ms: run.ms, daily: run.daily, reads: Reads.restore(run.reads, run.s), paused: true });
   });
   $('code-form').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -440,7 +476,7 @@ async function boot() {
   // ?dev=1 — a handle for test drivers and the console; never for the game.
   if (new URLSearchParams(location.search).has('dev')) {
     window.__hive = {
-      get s() { return s; }, get mode() { return mode; }, get elapsed() { return elapsed(); },
+      get s() { return s; }, get mode() { return mode; }, get elapsed() { return elapsed(); }, get reads() { return reads; },
       get frames() { return frames; }, get running() { return loop.running(); },
       layout: R.layout, at: R.at, view: R.view, Core, today,
     };

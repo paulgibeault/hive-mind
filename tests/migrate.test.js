@@ -149,3 +149,18 @@ test('a v1 wild run comes across as broken comb only while it stays fair', () =>
   assert.ok(dropped > 0, 'unfair frames are dropped');
   assert.equal(migrate({ run: { s: { v: 1, hive: 'somewhere-else', cells: [] } } }).run, null, 'an unknown hive is let go');
 });
+
+test('clean reads (#03): run counters, Pure counts and daily pure flags pass through untouched', () => {
+  const s = C.newGame('clover', 5);
+  const m = migrate({
+    run: { s, ms: 9, reads: { clean: 4, lucky: 1, hints: 0, puffs: 0 } },
+    records: { 'time-clover': rec(30000, 'Clover Field — fastest frame') },
+    frames: { clover: { played: 6, won: 3, pure: 2 } },
+    daily: { '2026-09-30': { ms: 61000, hive: 'clover', pure: true } },
+  });
+  assert.deepEqual(m, { run: undefined, records: {}, dropRecords: [], frames: null, daily: null });
+  // an old id merging into a new one keeps the new entry's Pure count
+  const store = { run: null, records: {}, frames: { meadow: { played: 2, won: 1 }, clover: { played: 5, won: 4, pure: 3 } }, daily: {} };
+  apply(store, migrate(read(store)));
+  assert.deepEqual(store.frames, { clover: { played: 5, won: 4, pure: 3 } });
+});
