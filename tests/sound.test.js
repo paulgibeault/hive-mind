@@ -320,6 +320,12 @@ test('the sting is a sleepy hum, not a sawtooth, and the queen\'s guard is a fif
   assert.ok(oscillators.length > 0 && oscillators.every((o) => o.type !== 'sawtooth'));
   const knock = calls.find((c) => c.name === 'body');
   assert.ok(knock.p.f0 > 400, 'the thump carries a knock above 400 Hz for phone speakers');
+  calls.length = 0;
+  pack.CUES.sting(ctx, {}, 0, { hive: 'apple', kind: 2, vseed: 5 }, rng(1));
+  const queen = calls.find((c) => c.name === 'body');
+  assert.ok(queen.p.f0 > 400, 'the queen\'s knock reads on a phone too');
+  const ratio = knock.p.f0 / queen.p.f0;
+  assert.ok(Math.abs(1200 * Math.log2(ratio / 1.5)) < 25, `queen's guard sits ${ratio.toFixed(3)}x lower, not a fifth`);
   assert.ok(!/sawtooth/.test(code(read('soundpack.js'))));
 });
 
