@@ -47,6 +47,7 @@
   };
 
   // ── one pack, one table: each hive is an instrument ───────────────────
+// (the hidden Queen's Frame too: tests/sound.test.js holds these keys to core's HIVES)
   // root     the tonic every climb starts from and every win resolves to
   // ladder   six rungs, an octave, the climb a frame makes (rung 5 = octave)
   // modes    Wildflowers picks its ladder from the frame seed instead
@@ -89,6 +90,19 @@
         { ratio: 2.76, gain: 0.4, decay: 0.22 },
         { ratio: 5.4, gain: 0.2, decay: 0.1 },
         { ratio: 8.93, gain: 0.08, decay: 0.05 },
+      ],
+    },
+    // the Queen's Frame (#10): a bronze bell in a deep box, under the other
+    // three — minor pentatonic on A, darker and longer, like its honey. The
+    // weekly frame should sound like an occasion, not a fourth instrument
+    // of the same family.
+    'queen': {
+      root: 440, ladder: [0, 3, 5, 7, 10, 12], tone: 2200, echo: { at: 0.09, gain: 0.26 }, drop: 2200,
+      partials: [
+        { ratio: 1.0, gain: 1.0, decay: 0.62 },
+        { ratio: 2.0, gain: 0.34, decay: 0.3 },
+        { ratio: 2.92, gain: 0.22, decay: 0.16 },
+        { ratio: 4.95, gain: 0.07, decay: 0.06 },
       ],
     },
   };

@@ -188,6 +188,57 @@ test('old ME-/OR- codes parse to clover/apple and open the identical frame', () 
   assert.equal(fp(C.generate('apple', 0xabc)), 3811161821);
 });
 
+// ── the Queen's Frame (#10) ──────────────────────────────────────────────
+
+test("the Queen's Frame: Apple Orchard's two kinds on broken comb, 9 × 20, hidden", () => {
+  const q = C.hiveById('queen');
+  assert.equal(q.id, 'queen');
+  assert.equal(q.name, "Queen's Frame");
+  assert.deepEqual([q.cols, q.rows], [9, 20], '9 wide: 10 drops a cell under 40 px on a 390 px phone');
+  assert.ok(q.guards > 0 && q.queens > 0 && q.broken > 0, 'both kinds, and broken comb');
+  assert.equal(q.puffs, 2);
+  assert.equal(q.hidden, true);
+  assert.deepEqual(C.PICKABLE.map((h) => h.id), ['clover', 'apple', 'wildflowers'], 'the selector and the daily never offer it');
+  assert.deepEqual(C.HIVES.filter((h) => h.hidden).map((h) => h.id), ['queen']);
+  assert.equal(C.HIVES.at(-1).id, 'queen', 'appended: the pickable hives keep their indices (prefs.hive)');
+  const f = C.generate('queen', 9);
+  assert.ok(f.cells.includes(C.Q) && f.broken.some(Boolean));
+});
+
+test("QU- codes round-trip and open the Queen's Frame", () => {
+  assert.equal(C.boardCode('queen', 35), 'QU-000000Z');
+  assert.deepEqual(C.parseCode('qu-000000z'), { hive: 'queen', seed: 35 });
+  const s = C.newGame(C.parseCode('QU-0AB12CD').hive, C.parseCode('QU-0AB12CD').seed);
+  assert.equal(s.hive, 'queen');
+  assert.deepEqual([s.cols, s.rows, s.puffs], [9, 20, 2]);
+});
+
+test("adding the Queen's Frame moved no other hive's frames", () => {
+  // the same prints as the pinned tests above, taken before the queen existed,
+  // plus Wildflowers (broken comb shares the stacked hive's code path)
+  const fp = (f) => [...f.cells, ...f.shown, ...f.shownH, ...f.broken, f.start]
+    .reduce((h, c, i) => (Math.imul(h ^ (c * 31 + i), 16777619) >>> 0), 2166136261);
+  assert.equal(fp(C.generate('clover', 7)), 3445885415);
+  assert.equal(fp(C.generate('apple', 7)), 4092483904);
+  assert.equal(fp(C.generate('wildflowers', 7)), 604351643);
+  assert.equal(fp(C.generate('wildflowers', 0xabc)), 1852827782);
+});
+
+test("Queen's Frame generation budget: 1,000 seeds, median tries ≤ 20, max < MAX_TRIES", () => {
+  const tries = [], ms = [];
+  for (let seed = 1; seed <= 1000; seed++) {
+    const t0 = performance.now();
+    tries.push(C.generate('queen', seed).tries);
+    ms.push(performance.now() - t0);
+  }
+  tries.sort((a, b) => a - b);
+  ms.sort((a, b) => a - b);
+  const median = tries[500], max = tries.at(-1);
+  console.log(`# queen tries: median ${median}, p90 ${tries[900]}, max ${max}; ms: median ${ms[500].toFixed(2)}, p99 ${ms[990].toFixed(1)}, max ${ms.at(-1).toFixed(1)}`);
+  assert.ok(median <= 20, `median tries ${median}`);
+  assert.ok(max < C.MAX_TRIES / 10, `max tries ${max} of ${C.MAX_TRIES}`);
+});
+
 test('Wildflowers generation budget: 1,000 seeds, median tries ≤ 10, max well under MAX_TRIES', () => {
   const tries = [];
   for (let seed = 1; seed <= 1000; seed++) tries.push(C.generate('wildflowers', seed).tries);
@@ -219,9 +270,22 @@ function stungOn(hive, seed, kind = C.G) {
 
 test('smoker: every hive starts with its puffs, and a new game carries them', () => {
   for (const h of C.HIVES) {
-    assert.equal(h.puffs, 1, `${h.id} gives one puff`);
+    assert.equal(h.puffs, h.id === 'queen' ? 2 : 1, `${h.id} gives ${h.id === 'queen' ? 'two puffs' : 'one puff'}`);
     assert.equal(C.newGame(h.id, 3).puffs, h.puffs);
   }
+});
+
+test("smoker: the Queen's Frame calms twice, and a third sting is the end", () => {
+  const s = C.newGame('queen', 41);
+  for (const k of [1, 0]) {
+    const i = s.cells.findIndex((c, j) => c !== C.EMPTY && !s.mark[j]);
+    assert.ok(C.reveal(s, i));
+    assert.ok(C.calm(s));
+    assert.equal(s.puffs, k);
+  }
+  assert.ok(C.reveal(s, s.cells.findIndex((c, j) => c !== C.EMPTY && !s.mark[j])));
+  assert.equal(C.calm(s), false);
+  assert.equal(s.phase, 'lost');
 });
 
 test('smoker: calm restores play, puts the right mark in, and costs a puff', () => {
@@ -329,6 +393,6 @@ test('smoker: a frame calmed and played out still wins, and survives a save in b
     }
     assert.equal(back.phase, 'won', h.id);
     assert.equal(back.events.at(-1).type, 'won');
-    assert.equal(back.puffs, 0);
+    assert.equal(back.puffs, h.puffs - 1);
   }
 });

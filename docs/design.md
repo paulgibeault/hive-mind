@@ -41,6 +41,28 @@ which keeps each cell about 40 px, a comfortable tap target. Densities (about
 broken Apple Orchard, is an easy later hive: broken comb is just a missing
 clue, which the solver already understands.
 
+### The Queen's Frame (`queen`, #10): the weekly stacked hive
+
+| Hive | Frame | Hazards | Smoker |
+|---|---|---|---|
+| Queen's Frame (`queen`) | 9 × 20 | 21 guards + 12 queen's guards, 10 broken cells | 2 puffs |
+
+Apple Orchard's two kinds on Wildflowers' broken comb. It is `hidden` in
+`HIVES`: the hive selector and the daily rotation never offer it, but it
+generates, plays, records (`time-queen`, `pure-time-queen`), fills a jar of
+dark royal honey and parses (`QU-…` codes) like any other hive. Nine wide,
+not ten: ten columns put a cell under 40 px on a 390 px phone (the frame's
+side margins are 4 px on a phone so nine columns clear 40 px).
+
+One frame a **frame week**, which runs from Sunday 00:00 local to the next
+Sunday and is named by the ISO week of its Monday (`week.js`: `frameWeek(date)
+= isoWeek(date + 1 day)`); the seed is `hashU32('queen-' + week)`, so the same
+week is the same frame on every device. It is open all week, from its own menu
+strip ("Queen's Frame · Sundays"), which shows the week's state: open, or
+cleared with its time and seal, and how long until the next frame.
+`Arcade.stats('weekly')` keeps each week's best clear. Densities were measured
+over 1,000 seeds (median 8 tries, max 89, about 1.5 ms a frame on a laptop).
+
 ## Fairness: how "no guessing" is kept
 
 `solver.js` is the promise. Every hidden cell carries a **domain**: the set of
@@ -215,6 +237,6 @@ and a sting costs time as in Race.
   listening test and a phone-speaker pass.
 - **Juice, optional**: a sting could collapse the frame into sand with the
   `Arcade.sim.sand` kernel. It's decoration and waits until the modes exist.
-- **A stacked hive** (broken Apple Orchard) and a **"hint" that explains** the
+- ~~A stacked hive~~ (the Queen's Frame, #10) and a **"hint" that explains** the
   next deduction, since the solver can already name the clues that prove a
   cell.

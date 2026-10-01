@@ -445,6 +445,7 @@ test('generation is unchanged by #2 (fingerprint of seeds 1–300, every hive)',
     clover: 'c7315847d520a8f27f5245e7d63880c3be8c22ae70a259b8723e2ac886c811e1',
     apple: '03e25b1e04cdf78aa2afe7e7e8f8e4eb09dd637f9de8e50ff13dd6a85115229b',
     wildflowers: '0eed28e057c14470ea69b7a5acfcc449f43d2860122eb5960f52229f80ef783a',   // re-pinned when Wildflowers moved to 26 guards / 12 broken
+    queen: 'fd1cfdfd63ef58884ec85d11d8905d43850a6066e1f3f101246ab277b4ddc865',   // #10, pinned when it was added (21 + 12 guards, 10 broken)
   };
   for (const h of C.HIVES) {
     const hash = createHash('sha256');
