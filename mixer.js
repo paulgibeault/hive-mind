@@ -6,11 +6,14 @@
  * checkable — a cue hears where the frame is, never what is under a cap.
  */
 
+import { nbrsOf, floods } from './core.js';
+
 // What a cue's params may carry from the game. Anything else is stripped
 // before a cue sees it.
 //   hive, seed   which frame (public: the frame code)
-//   progress     opened safe cells / all safe cells, 0..1 (public: the count
-//                of open cells and the hive's guard totals)
+//   progress     how far past the opening the frame is, 0..1: 0 with only
+//                the opening uncapped, 1 at the clear (public: the open cells
+//                and the hive's guard totals)
 //   cells        how many cells this action opened (public once it has)
 //   kind         what the action revealed or placed, AFTER it happened: the
 //                guard kind that stung, the pin a mark put in, or 'broken' for
@@ -51,17 +54,38 @@ export function stepOf(progress, steps = STEPS) {
   return Math.min(steps - 1, Math.floor(x * steps));
 }
 
+// How many cells a frame's opening uncaps. The opening is uncapped before
+// the first move, so walking it reads only open cells. One frame at a time
+// is all a game needs, so one entry is kept.
+let opening = { key: null, n: 0 };
+function openingSize(s) {
+  const key = `${s.hive}|${s.seed}`;
+  if (opening.key === key) return opening.n;
+  const nbrs = nbrsOf(s.cols, s.rows);
+  const seen = new Set([s.start]), stack = [s.start];
+  while (stack.length) {
+    const c = stack.pop();
+    if (floods(s, c)) for (const j of nbrs[c]) if (!seen.has(j)) { seen.add(j); stack.push(j); }
+  }
+  opening = { key, n: seen.size };
+  return seen.size;
+}
+
 /**
- * The context every cue gets: which frame, and how much of it is open. Reads
- * only what the board shows — the open cells and the hive's totals — so it
- * cannot carry a hidden cell's contents.
+ * The context every cue gets: which frame, and how far past its opening it
+ * is. Reads only what the board shows — the open cells and the hive's totals
+ * — so it cannot carry a hidden cell's contents. Progress is measured from
+ * the opening (not from an empty frame) so every frame climbs the whole
+ * ladder: the opening alone can be most of a frame.
  */
 export function cueContext(s) {
   if (!s) return {};
   const safe = s.cols * s.rows - s.guards - s.queens;
+  const start = openingSize(s);
   let open = 0;
   for (const o of s.open) if (o) open++;
-  return { hive: s.hive, seed: s.seed >>> 0, progress: safe > 0 ? Math.min(1, open / safe) : 0 };
+  const span = safe - start;
+  return { hive: s.hive, seed: s.seed >>> 0, progress: span > 0 ? Math.min(1, Math.max(0, (open - start) / span)) : 0 };
 }
 
 /** Two u32s → one well-mixed u32 (a murmur3-style finalizer). */

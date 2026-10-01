@@ -184,7 +184,8 @@ test('the cue context reads only what the board shows', () => {
   const ctx = cueContext(s);
   assert.deepEqual(Object.keys(ctx).sort(), ['hive', 'progress', 'seed']);
   assert.equal(ctx.hive, 'apple');
-  assert.ok(ctx.progress > 0 && ctx.progress < 1);
+  // measured from the opening: a fresh frame sits at the foot of the ladder
+  assert.equal(ctx.progress, 0);
   // scramble everything under the caps: the context can't change
   const t = structuredClone(s);
   for (let i = 0; i < t.cells.length; i++) {
@@ -196,6 +197,11 @@ test('the cue context reads only what the board shows', () => {
   const w = structuredClone(s);
   w.open = w.cells.map((c) => (c === Core.EMPTY ? 1 : 0));
   assert.equal(cueContext(w).progress, 1);
+  // and halfway past the opening is halfway up
+  const h = structuredClone(s);
+  const capped = h.cells.map((c, i) => (c === Core.EMPTY && !h.open[i] ? i : -1)).filter((i) => i >= 0);
+  capped.slice(0, capped.length / 2).forEach((i) => { h.open[i] = 1; });
+  assert.equal(cueContext(h).progress, Math.floor(capped.length / 2) / capped.length);
 });
 
 test('audio.js is the only shipped file that touches the launcher audio', () => {
