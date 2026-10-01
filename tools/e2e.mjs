@@ -451,7 +451,7 @@ assert.equal(late.moves, mid.moves + 1, 'only the second tap was a move; the dra
 await page.waitForTimeout(700);
 assert.equal(await H(() => window.__hive.running), false, 'the loop rests once the ripple is drawn');
 
-// a hold: input exposes the press's progress, the renderer draws the ring
+// a hold: input exposes the press's progress, the renderer draws the bubble
 const capped = await H(() => window.__hive.s.open.findIndex((o, i) => !o && !window.__hive.s.mark[i]));
 {
   const p = await xy(capped);
@@ -462,7 +462,7 @@ const capped = await H(() => window.__hive.s.open.findIndex((o, i) => !o && !win
   assert.ok(hold.t > 0.3 && hold.t < 1, `hold progress ${hold.t}`);
   await page.waitForTimeout(280); await page.mouse.up();
   assert.equal(await H((i) => window.__hive.s.mark[i], capped), 1);
-  assert.equal(await H(() => window.__hive.view.hold), null, 'the ring goes once the mark is in');
+  assert.equal(await H(() => window.__hive.view.hold), null, 'the bubble goes once the mark is in');
   await holdCell(capped);   // and back off
 }
 
