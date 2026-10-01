@@ -9,7 +9,10 @@
  *   sweep    the number lifts and a light runs clockwise round it; the cells
  *            open as it passes. A sweep that can't fire shakes its number
  *   mark     the pin drops in large and settles with one bounce
- *   hold     a ring fills round the pressed cell, so long-press can be learned
+ *   hold     a bubble floats up out of the pressed cell, clear of the finger,
+ *            with the mark it will set swelling inside and its rim filling;
+ *            when the press becomes a long-press it pops and the pin drops
+ *            from it into the cell. Let go before it pops and it's a tap
  *   sting    the guard's wings flicker and the frame shakes, under the flash
  *   won      the guards seal under dark wax, and honey pours down the comb
  *   smoke    the smoker calms a sting: grey haze swells and drifts off the
@@ -33,7 +36,7 @@
  */
 
 import { centre, extent, cellAt as hexAt } from './hex.js';
-import { EMPTY, Q, MARK_Q, nbrsOf, isScout } from './core.js';
+import { EMPTY, Q, NONE, MARK_G, MARK_Q, nbrsOf, isScout } from './core.js';
 import {
   RING_MS, SWEEP_MS, POUR_ROW_MS, rings, clockwise, showsNumber, finished,
   clamp01, easeOut, easeIn, pinScale, shake,
@@ -51,7 +54,8 @@ const PIN_MS = 240;
 const LIFT_MS = 260, LIGHT_MS = 110, SWEEP_STILL_MS = 120;
 const NOPE_MS = 160;
 const SHAKE_MS = 240, WING_MS = 40, FLASH_MS = 420, FLASH_STILL_MS = 300;
-const HOLD_SHOW = 120;           // a press younger than this is likely a tap: no ring yet
+const HOLD_SHOW = 120;           // a press younger than this is likely a tap: no bubble yet
+const DROP_MS = 150, POP_MS = 260;   // a held mark falls from its bubble, which bursts
 const POUR_CELL_MS = 160;
 const GLINT_MS = 300;
 const SMOKE_MS = 1100, SMOKE_STILL_MS = 600;
@@ -91,6 +95,9 @@ export function createRenderer(canvas) {
     pour: null,                  // { at, honey }: the win's honey
     glints: [],                  // { cell, at, to }: sparks rising to the rail
     hold: null,                  // the press under way (input.js pressing()), set before each draw
+    held: null,                  // { cell, at, x, y }: where the hold bubble was last drawn
+    pop: null,                   // { at, x, y }: a hold bubble bursting as its mark goes in
+    drops: new Map(),            // cell → { at, x, y }: a held mark falling from its bubble
     wakeAt: Infinity,            // motion off: when the showing still ends
     mode: 'play',                // tints the stung / won board
     rings: [],                   // [{ i, color }] — the sting lesson; main clears them with the sheet
@@ -383,24 +390,49 @@ export function createRenderer(canvas) {
     ctx.restore();
   }
 
+  /* A small crown, in the current fill: a notched band, w half-wide and
+   * h tall, its base at cy + h/2. The queen bee wears it, and so does her count. */
+  function crown(x, cy, w, h) {
+    const top = cy - h / 2, base = cy + h / 2;
+    ctx.beginPath();
+    ctx.moveTo(x - w, base);
+    ctx.lineTo(x - w, top);
+    ctx.lineTo(x - w * 0.5, top + h * 0.5);
+    ctx.lineTo(x, top - h * 0.15);
+    ctx.lineTo(x + w * 0.5, top + h * 0.5);
+    ctx.lineTo(x + w, top);
+    ctx.lineTo(x + w, base);
+    ctx.closePath();
+    ctx.fill();
+  }
+
   function markGlyph(x, y, r, m) {
-    // a pin pushed into the wax: amber disc (guard) or red square (queen's guard),
-    // shaped differently so the colours are never the only difference
+    // a pin pushed into the wax: an amber disc (guard), or the queen's red
+    // crown — the same crown her count wears — so colour is never the only
+    // difference
     const s = r * 0.3;
     ctx.save();
     ctx.shadowColor = 'rgba(42,29,16,0.5)';
     ctx.shadowBlur = r * 0.15;
     ctx.shadowOffsetY = r * 0.06;
-    ctx.fillStyle = m === MARK_Q ? C.queen : C.dark;
+    if (m === MARK_Q) {
+      ctx.fillStyle = C.queen;
+      crown(x, y + s * 0.1, s * 1.3, s * 1.5);
+      ctx.restore();
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = Math.max(1, r * 0.05);
+      ctx.strokeStyle = C.dark;
+      ctx.stroke();
+      return;
+    }
+    ctx.fillStyle = C.dark;
     ctx.beginPath();
-    if (m === MARK_Q) ctx.rect(x - s, y - s, 2 * s, 2 * s);
-    else ctx.arc(x, y, s * 1.05, 0, Math.PI * 2);
+    ctx.arc(x, y, s * 1.05, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-    ctx.fillStyle = m === MARK_Q ? C.dark : C.guard;
+    ctx.fillStyle = C.guard;
     ctx.beginPath();
-    if (m === MARK_Q) ctx.rect(x - s * 0.35, y - s * 0.35, s * 0.7, s * 0.7);
-    else ctx.arc(x, y, s * 0.42, 0, Math.PI * 2);
+    ctx.arc(x, y, s * 0.42, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -464,21 +496,21 @@ export function createRenderer(canvas) {
       ctx.fillStyle = honey ? C.dark : C.ink;
       ctx.fillText(String(w), x, y + r * 0.04);
     } else if (s.queens > 0) {
-
+      // one size for every number in a queen hive, so a lone count never
+      // reads as more urgent than a pair; the queen's count wears a crown
+      // (the queen bee's own), so colour is never the only difference
+      const size = Math.round(r * 0.72), ty = y + r * 0.1;
       const both = w > 0 && h > 0;
-      const size = both ? Math.round(r * 0.72) : big;
       ctx.font = `800 ${size}px ${FONT}`;
       if (w > 0) {
         ctx.fillStyle = honey ? C.dark : C.guard;
-        ctx.fillText(String(w), both ? x - r * 0.33 : x, y + r * 0.04);
+        ctx.fillText(String(w), both ? x - r * 0.33 : x, ty);
       }
       if (h > 0) {
         const hx = both ? x + r * 0.33 : x;
-        const b = size * 0.62;
-        ctx.strokeStyle = ctx.fillStyle = honey ? C.queenInk : C.queen;
-        ctx.lineWidth = Math.max(1.2, r * 0.07);
-        ctx.strokeRect(hx - b, y - b + r * 0.02, 2 * b, 2 * b);
-        ctx.fillText(String(h), hx, y + r * 0.04);
+        ctx.fillStyle = honey ? C.queenInk : C.queen;
+        ctx.fillText(String(h), hx, ty);
+        crown(hx, y - r * 0.33, r * 0.17, r * 0.19);
       }
     } else if (w > 0) {
       ctx.font = `800 ${big}px ${FONT}`;
@@ -589,6 +621,66 @@ export function createRenderer(canvas) {
     ctx.stroke();
   }
 
+  /* Where a hold bubble floats for cell i: above it, clear of the thumb
+   * pressing it — or, on a top row with no room above, off to the side,
+   * toward the middle of the frame. */
+  function bubbleSpot(i) {
+    const { x, y } = at(i), r = layout.r, R = r * 0.72;
+    if (y - r * 2.3 - R >= layout.top) return { x, y: y - r * 2.3 };
+    return { x: x + (x < layout.W / 2 ? 1 : -1) * r * 2.1, y: y - r * 0.5 };
+  }
+
+  /* The hold bubble: a pale bubble rises out of the pressed cell like a
+   * thought, trailing two dots back to it, with the mark the hold will set
+   * swelling inside (or the current one, struck through, if it will clear).
+   * Its rim fills over HOLD_MS; near the end it buzzes. t 0..1. */
+  function bubble(s, i, t, alpha, now) {
+    const r = layout.r, from = at(i), to = bubbleSpot(i);
+    const rise = easeOut(clamp01(t / 0.35));
+    const buzz = t > 0.6 && view.motion ? Math.sin(now / 16) * r * 0.05 * (t - 0.6) / 0.4 : 0;
+    const bx = from.x + (to.x - from.x) * rise + buzz, by = from.y + (to.y - from.y) * rise;
+    const R = r * 0.72 * (0.45 + 0.55 * rise);
+    view.held = { cell: i, at: now, x: to.x, y: to.y };
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // the thought's trail: two dots between the cell and the bubble
+    ctx.fillStyle = RING.safe;
+    for (const [f, rr] of [[0.3, 0.09], [0.6, 0.14]]) {
+      ctx.beginPath();
+      ctx.arc(from.x + (bx - from.x) * f, from.y + (by - from.y) * f, r * rr * rise, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.shadowColor = 'rgba(12,8,4,0.45)';
+    ctx.shadowBlur = r * 0.3;
+    ctx.shadowOffsetY = r * 0.08;
+    ctx.beginPath(); ctx.arc(bx, by, R, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // the rim: a faint track, filling clockwise from the top
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(2, r * 0.12);
+    ctx.strokeStyle = 'rgba(42,29,16,0.18)';
+    ctx.beginPath(); ctx.arc(bx, by, R, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = C.capDeep;
+    ctx.beginPath(); ctx.arc(bx, by, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * t); ctx.stroke();
+    // what the hold will do
+    const m = s.mark[i], top = s.queens > 0 ? MARK_Q : MARK_G;
+    const next = m >= top ? NONE : m + 1;
+    const k = 0.9 + 0.6 * easeOut(t);
+    if (next) markGlyph(bx, by, r * k * (R / (r * 0.72)), next);
+    else {
+      ctx.globalAlpha = alpha * 0.45;
+      markGlyph(bx, by, r * k * (R / (r * 0.72)), m);
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = C.dark;
+      ctx.lineWidth = Math.max(1.5, r * 0.09);
+      ctx.beginPath(); ctx.moveTo(bx - R * 0.5, by + R * 0.5); ctx.lineTo(bx + R * 0.5, by - R * 0.5); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   /** Draw; returns true while something is still moving. */
   function draw(s, now) {
     const d = layout.dpr;
@@ -672,14 +764,25 @@ export function createRenderer(canvas) {
       }
       blit(sprites.cap, x, y);
       if (s.mark[i]) {
-        let k = 1;
-        const p = view.pins.get(i);
-        if (p != null) {
+        let k = 1, px = x, py = y;
+        const p = view.pins.get(i), fall = view.drops.get(i);
+        if (fall) {
+          // out of the bubble and down into the wax; the pin's bounce follows
+          const t = (now - fall.at) / DROP_MS;
+          if (still || t >= 1) view.drops.delete(i);
+          else {
+            const e = easeIn(clamp01(t));
+            px = fall.x + (x - fall.x) * e; py = fall.y + (y - fall.y) * e; k = 1.25;
+            moving = true;
+          }
+        }
+        if (p != null && px === x && py === y) {
           const t = (now - p) / PIN_MS;
           if (still || t >= 1) view.pins.delete(i);
-          else { k = pinScale(t); ctx.globalAlpha = clamp01(t / 0.12); moving = true; }
+          else if (t >= 0) { k = pinScale(t); ctx.globalAlpha = clamp01(t / 0.12); moving = true; }
+          else moving = true;
         }
-        markGlyph(x, y, r * k, s.mark[i]);
+        markGlyph(px, py, r * k, s.mark[i]);
         ctx.globalAlpha = 1;
         if (over && s.phase === 'lost' && showAll) {
           // a mark on a safe cell was wrong
@@ -738,7 +841,7 @@ export function createRenderer(canvas) {
       } else view.refusal = null;
     }
 
-    // the hold ring: it fills as a press becomes a long-press
+    // the hold bubble: it rises as a press becomes a long-press
     const hold = view.hold;
     if (hold && s.phase === 'play') {
       const el = now - hold.since;
@@ -746,18 +849,31 @@ export function createRenderer(canvas) {
       if (still) show = !stillUntil(hold.since + HOLD_SHOW);   // then at full until let go
       else { show = el >= HOLD_SHOW / 2; moving = true; }
       if (show) {
-        const { x, y } = at(hold.cell);
-        ctx.globalAlpha = still ? 1 : clamp01((el - HOLD_SHOW / 2) / HOLD_SHOW);
-        ctx.lineCap = 'round';
-        ctx.beginPath(); ctx.arc(x, y, r * 0.98, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(28,20,11,0.55)';
-        ctx.lineWidth = Math.max(3, r * 0.2);
-        ctx.stroke();
-        ctx.beginPath(); ctx.arc(x, y, r * 0.98, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (still ? 1 : hold.t));
-        ctx.strokeStyle = C.capHi;
-        ctx.lineWidth = Math.max(2, r * 0.12);
-        ctx.stroke();
+        const fade = still ? 1 : clamp01((el - HOLD_SHOW / 2) / HOLD_SHOW);
+        bubble(s, hold.cell, still ? 1 : hold.t, fade, now);
+      }
+    }
+
+    // …and pops, once its mark is in: a burst ring and a few sparks
+    const pop = view.pop;
+    if (pop) {
+      const t = (now - pop.at) / POP_MS;
+      if (still || t >= 1) view.pop = null;
+      else {
+        const e = easeOut(clamp01(t)), R = r * 0.72;
+        ctx.globalAlpha = 1 - e;
+        ctx.strokeStyle = RING.safe;
+        ctx.lineWidth = Math.max(1.5, r * 0.1 * (1 - e));
+        ctx.beginPath(); ctx.arc(pop.x, pop.y, R * (1 + 0.6 * e), 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = C.capHi;
+        for (let k = 0; k < 6; k++) {
+          const ang = (k / 6) * Math.PI * 2 + 0.3;
+          ctx.beginPath();
+          ctx.arc(pop.x + Math.cos(ang) * R * (1 + e), pop.y + Math.sin(ang) * R * (1 + e), r * 0.07 * (1 - e) + 0.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
         ctx.globalAlpha = 1;
+        moving = true;
       }
     }
 
@@ -814,8 +930,9 @@ export function createRenderer(canvas) {
 
   /** A new frame, or a resumed one: nothing is mid-moment. */
   function reset() {
-    view.anims.clear(); view.pins.clear();
+    view.anims.clear(); view.pins.clear(); view.drops.clear();
     view.sweep = view.refusal = view.sting = view.smoke = view.pour = view.hold = null;
+    view.held = view.pop = null;
     view.glints = [];
     view.ghosts = [];
     if (sprites) sprites.honey = null;
@@ -842,7 +959,14 @@ export function createRenderer(canvas) {
   function refused(i, now) { view.refusal = { cell: i, at: now }; }
 
   function marked(i, m, now) {
+    view.drops.delete(i);
     if (m && view.motion) view.pins.set(i, now); else view.pins.delete(i);
+    // set by a hold on this cell: its bubble pops, and the pin falls from it
+    const h = view.held;
+    view.held = null;
+    if (!h || h.cell !== i || now - h.at > 120 || !view.motion) return;
+    view.pop = { at: now, x: h.x, y: h.y };
+    if (m) { view.drops.set(i, { at: now, x: h.x, y: h.y }); view.pins.set(i, now + DROP_MS); }
   }
 
   function stung(i, now) { view.sting = { cell: i, at: now }; }

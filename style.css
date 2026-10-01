@@ -71,7 +71,8 @@ button, input { font: inherit; color: inherit; }
 .rail-count { flex: 1; display: flex; justify-content: center; gap: 12px; font-family: var(--mono); font-size: 17px; font-weight: 600; }
 .rail-count .n { display: inline-flex; align-items: center; gap: 5px; }
 .rail-count .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--guard); box-shadow: inset 0 -3px 0 #2a1d10; }
-.rail-count .dot.q { background: var(--queen); border-radius: 2px; }
+/* the queen's guard: her crown, as on the pin and her count */
+.rail-count .dot.q { width: 12px; background: var(--queen); border-radius: 0; box-shadow: none; clip-path: polygon(0 100%, 0 13%, 25% 56%, 50% 0, 75% 56%, 100% 13%, 100% 100%); }
 .clock { font-size: 17px; min-width: 3.4em; text-align: right; }
 .tool {
   width: 40px; height: 40px;
