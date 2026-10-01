@@ -11,6 +11,7 @@ import { migrate, recordKeys } from './migrate.js';
 import { createRenderer } from './render.js';
 import { bindInput } from './input.js';
 import { initAudio, sfx, sfxReset, cueContext } from './audio.js';
+import { refused } from './juice.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -35,6 +36,9 @@ let markMode = false;
 let base = 0;                 // ms on the clock from before this session
 let clock = null;             // Arcade.session tracker for the live stretch
 let loop = null;
+let wake = null;              // a resting loop's one more frame, for a still that ends
+let input = null;
+let frames = 0;               // frames drawn, for test drivers checking the loop rests
 let tickTimer = null;
 
 // ── time ─────────────────────────────────────────────────────────────────
@@ -66,8 +70,29 @@ function show(next) {
 
 function kick() { if (loop) loop.kick(); }
 function frame() {
-  const moving = R.draw(mode === 'menu' ? null : s, performance.now());
-  if (moving) loop.start(); else loop.stop();
+  const now = performance.now();
+  R.view.hold = input ? input.pressing(now) : null;
+  const moving = R.draw(mode === 'menu' ? null : s, now);
+  frames++;
+  if (moving) loop.start(); else { loop.stop(); rest(R.view.wakeAt - now); }
+}
+// The loop rests as soon as nothing moves. With motion off, a still that has
+// to end (an outline shown for 120 ms) asks for one more frame when it does.
+function rest(ms) {
+  if (wake) { wake.cancel(); wake = null; }
+  if (Number.isFinite(ms)) wake = Arcade.session.setTimeout(() => { wake = null; kick(); }, Math.max(0, ms) + 1);
+}
+
+// PLACEHOLDER until #09: honey.js's honeyColour(hive, seed) replaces this
+// whole function (same signature, same { top, bottom }). Clover Field and
+// Apple Orchard are #09's colours; Wildflowers stands in a seeded amber-to-
+// russet blend for the real one.
+function honeyColour(hive, seed) {
+  if (hive === 'clover') return { top: '#fff0b8', bottom: '#fbe7a1' };
+  if (hive === 'apple') return { top: '#e8a846', bottom: '#dd9a38' };
+  const h = Math.imul((seed >>> 0) ^ 0x9e3779b9, 2654435761) >>> 0;
+  const hue = 18 + (h % 23), light = 38 + ((h >>> 8) % 13);
+  return { top: `hsl(${hue + 4} 72% ${light + 8}%)`, bottom: `hsl(${hue} 70% ${light}%)` };
 }
 
 // ── the rail ─────────────────────────────────────────────────────────────
@@ -114,8 +139,7 @@ function begin(state, opts = {}) {
   clock.pause();
   markMode = false;
   sfxReset();
-  R.view.fades.clear();
-  R.view.flashAt = -1;
+  R.reset();
   fit();
   renderHud();
   show(opts.paused ? 'paused' : 'play');
@@ -209,27 +233,28 @@ function recordWin() {
 const cue = (extra) => ({ ...cueContext(s), ...extra });
 
 // One action is one sound: a flood or a sweep is a single cue scaled by how
-// many cells it opened, never one uncap per cell. A lone broken comb (shown
-// now that it is open) plays hollow.
-function uncapSound(events) {
+// many cells it opened, never one uncap per cell; a flood drops one droplet
+// per ring of the ripple the renderer draws. A lone broken comb (shown now
+// that it is open) plays hollow.
+function uncapSound(events, rings) {
   const ups = events.filter((e) => e.type === 'uncap');
   const n = ups.reduce((k, e) => k + e.cells.length, 0);
-  if (n > 1) sfx('flood', cue({ cells: n }));
+  if (n > 1) sfx('flood', cue({ cells: n, rings }));
   else if (n === 1) sfx('uncap', cue(s.broken[ups[0].cells[0]] ? { cells: 1, kind: 'broken' } : { cells: 1 }));
 }
 
 function drain() {
   const now = performance.now();
   const events = s.events.splice(0);
-  uncapSound(events);
+  let rings = 0;                  // the deepest ripple this action drew
   for (const e of events) {
     switch (e.type) {
       case 'uncap':
-        R.uncapped(e.cells, now);
+        rings = Math.max(rings, R.uncapped(e, now));
         break;
-      case 'mark': sfx(e.mark ? 'mark' : 'unmark', cue({ kind: e.mark })); break;
+      case 'mark': R.marked(e.cell, e.mark, now); sfx(e.mark ? 'mark' : 'unmark', cue({ kind: e.mark })); break;
       case 'sting':
-        R.view.flashAt = now;
+        R.stung(e.cell, now);
         sfx('sting', cue({ kind: e.kind }));
         if (navigator.vibrate) { try { navigator.vibrate([40, 40, 80]); } catch { /* not allowed */ } }
         runClock(false);
@@ -241,6 +266,7 @@ function drain() {
         break;
       case 'won':
         runClock(false);
+        R.won(honeyColour(s.hive, s.seed), now);
         sfx('won', cue());
         recordWin();
         dropRun();
@@ -249,21 +275,23 @@ function drain() {
       default: break;
     }
   }
+  uncapSound(events, rings);      // same tick as the rest: order here is inaudible
   renderHud();
   loop.start();
 }
 
 function act(fn, i) {
   if (mode !== 'play' || !s) return;
-  if (fn(s, i)) { drain(); persistRun(); }
-  else if (fn === Core.tap && sweepRefused(i)) sfx('nope', cue());
-}
-
-// A tap on an uncapped number that has capped, unpinned neighbours but whose
-// pins don't add up: the sweep can't fire. Reads only what the board shows.
-function sweepRefused(i) {
-  if (!s.open[i] || s.broken[i] || !(s.shown[i] + s.shownH[i])) return false;
-  return Core.nbrsOf(s.cols, s.rows)[i].some((j) => !s.open[j] && s.mark[j] === Core.NONE);
+  const sweeping = fn === Core.tap && !!s.open[i];
+  if (fn(s, i)) {
+    if (sweeping) R.swept(i, performance.now());   // before its uncaps, which follow its light
+    drain(); persistRun();
+  } else if (sweeping && refused(s, Core.nbrsOf(s.cols, s.rows), i)) {
+    // the marks round it don't add up: the number shakes and knocks
+    R.refused(i, performance.now());
+    sfx('nope', cue());
+    kick();
+  }
 }
 
 function pause() {
@@ -386,8 +414,9 @@ async function boot() {
   $('lost-new').addEventListener('click', newFrame);
   $('lost-menu').addEventListener('click', openMenu);
 
-  bindInput($('view'), {
+  input = bindInput($('view'), {
     active: () => mode === 'play',
+    onPress: kick,                                   // the hold ring starts or ends
     cellAt: (x, y) => R.cellAt(x, y),
     markMode: () => markMode,
     onTap: (i) => act(Core.tap, i),
@@ -412,7 +441,8 @@ async function boot() {
   if (new URLSearchParams(location.search).has('dev')) {
     window.__hive = {
       get s() { return s; }, get mode() { return mode; }, get elapsed() { return elapsed(); },
-      layout: R.layout, at: R.at, Core, today,
+      get frames() { return frames; }, get running() { return loop.running(); },
+      layout: R.layout, at: R.at, view: R.view, Core, today,
     };
   }
 

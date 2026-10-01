@@ -37,7 +37,7 @@ test('the rules import under node with no Arcade global and no DOM in sight', as
   assert.equal(typeof globalThis.Arcade, 'undefined');
   assert.equal(typeof globalThis.document, 'undefined');
   // (mixer.js too: the sound decisions are replayable, so they take `now` as an argument)
-  for (const f of ['core.js', 'solver.js', 'hex.js', 'migrate.js', 'mixer.js']) {
+  for (const f of ['core.js', 'solver.js', 'hex.js', 'migrate.js', 'mixer.js', 'juice.js']) {
     await assert.doesNotReject(() => import(`../${f}`));
     // code only: the header comment names the very things it forbids
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8')
@@ -88,7 +88,7 @@ test('sw.js cleans up only its own caches and never activates unannounced', () =
 
 // ── staging declaration ──────────────────────────────────────────────────
 test('stage.mjs publishes what the page and manifest name, and drops the dev set', () => {
-  for (const f of ['index.html', 'main.js', 'core.js', 'hex.js', 'solver.js', 'migrate.js', 'arcade-rng.js', 'render.js',
+  for (const f of ['index.html', 'main.js', 'core.js', 'hex.js', 'solver.js', 'migrate.js', 'juice.js', 'arcade-rng.js', 'render.js',
     'input.js', 'audio.js', 'mixer.js', 'soundpack.js', 'style.css', 'manifest.json', 'sw.js', 'icon.svg', 'icon.png']) {
     assert.ok(tracked.includes(f), `${f} is not tracked`);
     assert.ok(!isDevOnly(f), `${f} would be dropped from the deploy`);

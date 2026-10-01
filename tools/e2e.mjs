@@ -172,6 +172,136 @@ for (const i of safe.slice(0, Math.floor(safe.length * 0.6))) {
 await page.waitForTimeout(300);
 await shot('5-wildflowers');
 
+// ── the juice pass: motion never blocks, and motion off rests at once ──
+async function codeFrame(code) {
+  await page.click('#pause'); await page.click('#quit');
+  await H(() => { document.getElementById('code-box').open = true; });
+  await page.fill('#code-in', code);
+  await page.press('#code-in', 'Enter');
+  await waitMode('play');
+}
+/* The hidden zero whose flood opens the most cells, found on a copy. */
+const biggestFlood = () => H(() => {
+  const { s, Core } = window.__hive;
+  let best = null;
+  for (let i = 0; i < s.cells.length; i++) {
+    if (s.open[i] || s.cells[i] !== 0 || !Core.floods(s, i)) continue;
+    const t = structuredClone({ ...s, events: [] });
+    Core.tap(t, i);
+    if (!best || t.events[0].cells.length > best.cells.length) best = { i, cells: t.events[0].cells };
+  }
+  return best;
+});
+const FLOOD_CODE = 'CL-000000I';   // a 39-cell flood, 13 rings deep
+await codeFrame(FLOOD_CODE);
+const flood = await biggestFlood();
+assert.ok(flood && flood.cells.length > 20, 'a frame with a real flood in it');
+
+// a flood: core opens every cell at once, and the drawing ripples out after
+await tapCell(flood.i);
+const mid = await H((cells) => {
+  const { s, view } = window.__hive, now = performance.now();
+  const starts = cells.map((c) => view.anims.get(c));
+  return {
+    open: cells.every((c) => s.open[c] === 1),
+    pending: cells.filter((c, k) => starts[k] > now + 20),     // still drawn capped
+    end: Math.max(...starts) + 180,
+    outside: s.cells.findIndex((c, i) => c === 0 && !s.open[i] && !s.mark[i]),
+    moves: s.moves,
+  };
+}, flood.cells);
+assert.ok(mid.open, 'core opened the whole flood at once');
+assert.ok(mid.pending.length > 0, 'while the ripple is still drawing it');
+// a tap on a cell the ripple hasn't reached is a tap on an open cell: it doesn't uncap it again
+await tapCell(mid.pending[mid.pending.length - 1]);
+// and a second tap elsewhere lands at once, mid-ripple
+await tapCell(mid.outside);
+const late = await H(([o, end]) => {
+  const { s } = window.__hive;
+  return { o: s.open[o], during: performance.now() < end, moves: s.moves, mode: window.__hive.mode };
+}, [mid.outside, mid.end]);
+assert.ok(late.during, 'the second tap came while the ripple was still running');
+assert.equal(late.o, 1, 'the second tap uncapped its cell');
+assert.equal(late.moves, mid.moves + 1, 'only the second tap was a move; the drawn-capped cell was already open');
+await page.waitForTimeout(700);
+assert.equal(await H(() => window.__hive.running), false, 'the loop rests once the ripple is drawn');
+
+// a hold: input exposes the press's progress, the renderer draws the ring
+const capped = await H(() => window.__hive.s.open.findIndex((o, i) => !o && !window.__hive.s.mark[i]));
+{
+  const p = await xy(capped);
+  await page.mouse.move(p.x, p.y); await page.mouse.down();
+  await page.waitForTimeout(200);
+  const hold = await H(() => window.__hive.view.hold);
+  assert.equal(hold.cell, capped);
+  assert.ok(hold.t > 0.3 && hold.t < 1, `hold progress ${hold.t}`);
+  await page.waitForTimeout(280); await page.mouse.up();
+  assert.equal(await H((i) => window.__hive.s.mark[i], capped), 1);
+  assert.equal(await H(() => window.__hive.view.hold), null, 'the ring goes once the mark is in');
+  await holdCell(capped);   // and back off
+}
+
+// a sweep that can't fire: the number is told, nothing moves in core
+const live = await H(() => {
+  const { s, Core } = window.__hive, nbrs = Core.nbrsOf(s.cols, s.rows);
+  return s.open.findIndex((o, i) => o && s.shown[i] > 0 && nbrs[i].some((j) => !s.open[j] && !s.mark[j]));
+});
+{
+  const before = await H(() => window.__hive.s.moves);
+  await tapCell(live);
+  assert.equal(await H(() => window.__hive.view.refusal && window.__hive.view.refusal.cell), live);
+  assert.equal(await H(() => window.__hive.s.moves), before);
+}
+
+// a sweep that fires: mark the number's guards through the pointer, tap it,
+// and the light runs round it while its other neighbours open
+const sweepable = await H(() => {
+  const { s, Core } = window.__hive, nbrs = Core.nbrsOf(s.cols, s.rows);
+  return s.open.findIndex((o, i) => o && s.shown[i] > 0
+    && nbrs[i].some((j) => !s.open[j] && s.cells[j] === 0) && nbrs[i].every((j) => !s.mark[j]));
+});
+{
+  const guards = await H((i) => {
+    const { s, Core } = window.__hive;
+    return Core.nbrsOf(s.cols, s.rows)[i].filter((j) => s.cells[j] !== 0);
+  }, sweepable);
+  for (const g of guards) await holdCell(g);
+  await tapCell(sweepable);
+  const sw = await H((i) => {
+    const { s, view, Core } = window.__hive;
+    return { cell: view.sweep && view.sweep.cell, order: view.sweep && view.sweep.order.length,
+      done: Core.nbrsOf(s.cols, s.rows)[i].every((j) => s.open[j] || s.mark[j]) };
+  }, sweepable);
+  assert.equal(sw.cell, sweepable);
+  assert.ok(sw.order >= 2 && sw.done, 'the sweep opened every unmarked neighbour at once');
+}
+
+// motion off (reduced motion, power saver): every moment is its still, and
+// the loop sleeps as soon as it's drawn
+await codeFrame(FLOOD_CODE);
+await H(() => { window.__hive.view.motion = false; });
+await page.waitForTimeout(100);
+{
+  const f0 = await H(() => window.__hive.frames);
+  await tapCell(flood.i);
+  await page.waitForTimeout(150);
+  const st = await H(() => ({ anims: window.__hive.view.anims.size, running: window.__hive.running, frames: window.__hive.frames }));
+  assert.equal(st.anims, 0, 'no ripple: the flood is drawn all at once');
+  assert.equal(st.running, false, 'and the loop is asleep');
+  assert.ok(st.frames - f0 <= 4, `a still flood costs a frame or two, not an animation (${st.frames - f0})`);
+  // a refused sweep's still is an outline for a moment: one wake, then rest
+  const n = await H(() => {
+    const { s, Core } = window.__hive, nbrs = Core.nbrsOf(s.cols, s.rows);
+    return s.open.findIndex((o, i) => o && s.shown[i] > 0 && nbrs[i].some((j) => !s.open[j] && !s.mark[j]));
+  });
+  await tapCell(n);
+  await page.waitForTimeout(50);
+  assert.ok(Number.isFinite(await H(() => window.__hive.view.wakeAt)), 'the outline asks for one more frame');
+  await page.waitForTimeout(300);
+  assert.deepEqual(await H(() => [window.__hive.view.refusal, window.__hive.running]), [null, false]);
+}
+await H(() => { window.__hive.view.motion = true; });
+
 // every hive plays out: a real frame cleared on each, and each records its time
 for (let k = 1; k <= 3; k++) {
   await page.click('#pause'); await page.click('#quit');

@@ -153,8 +153,8 @@ test('the scale rung from progress is monotonic and bounded', () => {
 });
 
 // ── no tells ─────────────────────────────────────────────────────────────
-test('sfx params only include hive, seed, progress, cells and kind', () => {
-  assert.deepEqual([...ALLOWED].sort(), ['cells', 'hive', 'kind', 'progress', 'seed']);
+test('sfx params only include hive, seed, progress, cells, rings and kind', () => {
+  assert.deepEqual([...ALLOWED].sort(), ['cells', 'hive', 'kind', 'progress', 'rings', 'seed']);
   assert.deepEqual(clean({ hive: 'apple', seed: 1, progress: 0.5, cells: 3, kind: 2, cell: 17, guard: true, s: {} }),
     { hive: 'apple', seed: 1, progress: 0.5, cells: 3, kind: 2 });
   assert.deepEqual(clean(null), {});
