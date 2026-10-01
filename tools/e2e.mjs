@@ -88,6 +88,9 @@ assert.deepEqual(await H(() => {
     Arcade.records.get('time-apple').value, Arcade.stats.get('frames'), Arcade.stats.get('daily')['2026-09-01'].hive];
 }), [3, 'apple', 13, false, null, 52100, { apple: { played: 3, won: 1 } }, 'apple']);
 assert.equal(await page.textContent('#continue-title'), 'Back to the Apple Orchard frame');
+// the pantry (#09) is new: an old save has none, and nothing is made up from its frame counts
+assert.deepEqual(await H(() => Arcade.stats.get('pantry') || {}), {});
+assert.equal(await page.textContent('#pantry-sum'), 'empty');
 await shot('1-menu');
 
 // menu: three hives, Clover Field first; the daily is on offer
@@ -570,7 +573,13 @@ assert.equal(await page.textContent('#won-reads'), `${pureReads.clean} of ${pure
 const pureRec = await H(() => Arcade.records.get('pure-time-clover'));
 assert.ok(pureRec && pureRec.value > 0 && pureRec.direction === 'lower' && pureRec.format === 'duration-ms');
 assert.equal(await H(() => Arcade.stats.get('frames').clover.pure), pureBefore + 1);
-await page.waitForTimeout(400);
+// the won sheet's jar (#09): this frame's honey, numbered, with its seal
+assert.match(await page.textContent('#won-note'), /^Pure · jar \d+ · clover honey$/);
+assert.deepEqual(await H(() => {
+  const j = document.querySelector('#won-jar .jar');
+  return [j.style.getPropertyValue('--top'), j.style.getPropertyValue('--bottom')];
+}), await H(() => { const { s } = window.__hive, c = window.__hive.honeyColour(s.hive, s.seed); return [c.top, c.bottom]; }));
+await page.waitForTimeout(1300);
 await shot('10-won-pure');
 
 // ...and one forced random uncap on the way costs the seal, quietly
@@ -682,6 +691,70 @@ assert.equal(await page.isVisible('#puff'), false, 'no puffs left: no smoker');
 assert.equal(await page.getAttribute('#retry', 'class'), 'primary');
 assert.equal(await H(() => Arcade.state.get('run')), null, 'and the run is let go');
 await page.click('#lost-menu');
+
+// ── the pantry (#09): win a frame, open the pantry, replay the jar ──────
+await page.waitForTimeout(200);
+await shot('13-menu-pantry');
+assert.match(await page.textContent('#pantry-sum'), /^\d+ jars · \d+ sealed$/);
+assert.ok(await page.$$eval('#pantry-mini .jar', (j) => j.length) >= 6, 'the mini shelf shows the newest jars');
+assert.match(await page.$eval('#month-comb', (e) => e.getAttribute('aria-label')), /^\w+: \d+ of \d+ days? cleared/);
+assert.ok(await page.$$eval('#month-comb .day', (d) => d.length) >= 28, 'the month, as comb');
+assert.equal(await page.$$eval('#month-comb .day.today', (d) => d.length), 1);
+assert.match(await page.textContent('#daily-streak'), /streak/);
+assert.match(await page.$eval('#hive button:nth-child(1) .jars', (e) => e.textContent), /^\d+ jars?$/);
+await page.click('#pantry-open');
+await waitMode('pantry');
+assert.equal(await page.evaluate(() => document.activeElement.id), 'pantry-back', 'focus lands in the sheet');
+// a shelf per hive, and the Queen's Frame waiting with an empty slot
+assert.deepEqual(await page.$$eval('.shelf-head h3', (h) => h.map((x) => x.textContent)),
+  ['Clover Field', 'Apple Orchard', 'Wildflowers', "Queen's Frame"]);
+assert.equal(await page.$$eval('.shelf-box:nth-child(4) .slot-empty', (e) => e.length), 1);
+for (const k of [1, 2, 3]) assert.ok(await page.$$eval(`.shelf-box:nth-child(${k}) button.jar`, (j) => j.length) >= 1);
+// jars are buttons with their own words
+const labels = await page.$$eval('button.jar', (j) => j.map((b) => b.getAttribute('aria-label')));
+for (const l of labels) assert.match(l, /^(Clover Field|Apple Orchard|Wildflowers), \d{1,2} [A-Z][a-z]{2}, \d+:\d\d(, pure)?$/);
+assert.ok(labels.some((l) => l.endsWith(', pure')));
+// tap the Pure clover jar
+const pureJar = await page.$$eval('.shelf-box:nth-child(1) button.jar', (j) => j.findIndex((b) => b.querySelector('.wax')));
+assert.ok(pureJar >= 0);
+const jarSel = `.shelf-box:nth-child(1) button.jar >> nth=${pureJar}`;
+await page.click(jarSel);
+const jarCode = await page.textContent('#detail-code');
+assert.match(jarCode, /^CL-[0-9A-Z]{7}$/);
+assert.match(await page.textContent('#detail-line'), /^[\d.:s]+ · \d+ clean · 0 hints · 0 puffs$/);
+await page.waitForTimeout(200);
+await shot('14-pantry');
+// keys: arrows walk the shelf, one tab stop per shelf
+const focusAt = () => page.evaluate(() => [...document.activeElement.parentNode.querySelectorAll('.jar')].indexOf(document.activeElement));
+await page.focus(jarSel);
+await page.keyboard.press('Home');
+assert.equal(await focusAt(), 0);
+await page.keyboard.press('ArrowRight');
+assert.equal(await focusAt(), 1);
+assert.equal(await page.$$eval('.shelf-box:nth-child(1) button.jar', (j) => j.filter((b) => b.tabIndex === 0).length), 1);
+await page.click(jarSel);
+// Send copies the code when there's no share sheet
+await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+await H(() => { Object.defineProperty(navigator, 'share', { value: undefined, configurable: true }); });
+await page.click('#detail-send');
+await page.waitForTimeout(300);
+assert.equal(await H(() => navigator.clipboard.readText()), jarCode, 'Send copies the code');
+await page.evaluate(() => { document.getElementById('jar-detail').scrollIntoView(); });
+await shot('15-jar-detail');
+// Replay: the same frame loads
+await page.click('#detail-replay');
+await waitMode('play');
+assert.equal(await H(() => window.__hive.Core.boardCode(window.__hive.s.hive, window.__hive.s.seed)), jarCode);
+// cleared again, it updates its jar rather than filling another
+const jarsBefore = await H(() => window.__hive.Pantry.totals(Arcade.stats.get('pantry')).jars);
+await solverClear();
+assert.equal(await H(() => window.__hive.Pantry.totals(Arcade.stats.get('pantry')).jars), jarsBefore, 'no duplicate jar');
+await page.click('#won-menu');
+// Escape leaves the pantry
+await page.click('#pantry-open');
+await waitMode('pantry');
+await page.keyboard.press('Escape');
+await waitMode('menu');
 
 // landscape
 await page.click('#play');

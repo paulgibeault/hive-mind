@@ -193,11 +193,29 @@
     { lo: 0.033, hi: 0.047, rise: 2.8, band: 2550 },
   ];
 
-  // Honey colour → clink pitch: pale honey rings higher. Clover is pale,
-  // apple amber, wildflowers anywhere from amber to dark, by seed (#09's
-  // honeyColour(hive, seed) should agree when it lands).
-  const lightness = (p) => p.hive === 'apple' ? 0.6
-    : p.hive === 'wildflowers' ? 0.25 + 0.4 * (((p.seed >>> 0) % 97) / 96) : 0.85;
+  // Honey colour → clink pitch: pale honey rings higher. This is honey.js's
+  // lightness(hive, seed), copied because the pack loads as a plain script;
+  // tests/honey.test.js holds the two to the same numbers. Clover is pale
+  // (with a tiny seeded wobble), apple amber, wildflowers amber to russet by
+  // seed, and the Queen's Frame (#10) dark.
+  const honeyMix = (seed, salt) => {
+    let h = (Math.imul((seed >>> 0) ^ 0x9e3779b9, 0x85ebca6b) ^ salt) >>> 0;
+    h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+    h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+    return (h ^ (h >>> 16)) >>> 0;
+  };
+  const honeyUnit = (seed, salt) => honeyMix(seed, salt) / 4294967296;
+  const lightness = (p) => {
+    const seed = (p.seed >>> 0);
+    if (p.hive === 'wildflowers') {
+      const lift = 0.08 + 0.08 * honeyUnit(seed, 3);
+      const lo = 0.24 + (0.32 - lift) * honeyUnit(seed, 2);
+      return lo + lift / 2;
+    }
+    if (p.hive === 'apple') return 0.5676;
+    if (p.hive === 'queen') return 0.1667;
+    return 0.8343 + (honeyUnit(seed, 7) * 2 - 1) * 0.015;
+  };
 
   const CUES = {
     'uncap': function (ctx, o, t, p0, r0) {
