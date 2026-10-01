@@ -148,3 +148,96 @@ test('resuming keeps the counters; a save from before clean reads cannot be Pure
   // junk in the counters reads as zero rather than breaking the rail
   assert.deepEqual(Reads.restore({ clean: 'x', lucky: -2 }, s), Reads.fresh());
 });
+
+// ── the sting lesson (#04) ──────────────────────────────────────────────────
+
+/* Tap i the way act() does and, if it stung, ask for the lesson. */
+function sting(s, i) {
+  const r = play(s, Reads.fresh(), i);
+  assert.equal(s.phase, 'lost', `tapping ${i} stung`);
+  return Reads.lesson(s, r.move, r.proven);
+}
+
+test('pinned example (PlayProposed, Clover Field seed 7): tapping 49 is the proven-guard case, ring [48]', () => {
+  const s = playProposed();
+  s.mark[49] = C.NONE;               // the canvas marks it; the lesson is for tapping it anyway
+  const l = sting(s, 49);
+  assert.equal(l.kind, 'proven-guard');
+  assert.deepEqual(l.clues, [48]);
+  assert.equal(l.stung, 49);
+  assert.deepEqual(l.rings, [{ i: 48, color: 'honey' }, { i: 49, color: 'red' }]);
+  // 48 is a 1 whose only capped neighbour was 49: the specific sentence
+  assert.equal(l.text, 'This 1 had just one capped neighbour, the cell you uncapped.');
+});
+
+test('a forced guess that stings says so and shows a cell from provenNow().safe', () => {
+  const s = playProposed();
+  const before = C.provenNow(s);
+  const guess = s.cells.findIndex((c, i) => c !== C.EMPTY && !s.mark[i] && !before.guard.has(i));
+  assert.ok(guess >= 0);
+  const l = sting(s, guess);
+  assert.equal(l.kind, 'guess');
+  assert.equal(l.text, 'That was a guess, and nothing proved it either way. This cell was safe to open:');
+  assert.ok(before.safe.has(l.safeHint));
+  assert.equal(l.safeHint, [...before.safe][0], 'the first proven-safe cell');
+  assert.deepEqual(l.rings, [{ i: l.safeHint, color: 'safe' }, { i: guess, color: 'red' }]);
+  assert.deepEqual(l.clues, []);
+});
+
+test('a sweep over a wrong mark rings its source number', () => {
+  let found = null;
+  for (let seed = 1; seed < 200 && !found; seed++) {
+    const s = C.newGame('clover', seed);
+    const nb = C.nbrsOf(s.cols, s.rows);
+    const c = s.open.findIndex((o, i) => o && s.shown[i] >= 1 && nb[i].some((j) => !s.open[j] && s.cells[j] === C.EMPTY));
+    if (c < 0) continue;
+    // the mark goes on a safe cell instead of one of the guards
+    const guards = nb[c].filter((j) => s.cells[j] === C.G);
+    for (const j of guards.slice(1)) s.mark[j] = C.MARK_G;
+    s.mark[nb[c].find((j) => !s.open[j] && s.cells[j] === C.EMPTY)] = C.MARK_G;
+    found = { s, c };
+  }
+  const { s, c } = found;
+  const l = sting(s, c);
+  assert.equal(l.kind, 'wrong-mark');
+  assert.deepEqual(l.clues, [c]);
+  assert.equal(l.text, 'A mark was on a safe cell, so the sweep trusted it.');
+  assert.deepEqual(l.rings, [{ i: c, color: 'honey' }, { i: s.stung, color: 'red' }]);
+  assert.equal(s.cells[s.stung], C.G);
+});
+
+test('specific sentences only for a full one-clue proof; everything else gets the generic line', () => {
+  // Every proven guard in many mid-game states of every hive: tap it, read
+  // the lesson, and check the sentence against the proof's shape.
+  const seen = { one: 0, many: 0, generic: 0, queen: 0 };
+  for (const h of C.HIVES) {
+    for (let seed = 1; seed <= 12; seed++) {
+      const base = C.newGame(h.id, seed);
+      const nb = C.nbrsOf(base.cols, base.rows);
+      // play part of the frame cleanly, so plenty of guards are proven
+      for (let k = 0; k < 25 && base.phase === 'play'; k++) {
+        const [i] = C.provenNow(base).safe;
+        if (i === undefined || C.safeLeft(base) < 3) break;
+        C.tap(base, i);
+      }
+      if (base.phase !== 'play') continue;
+      for (const [g, kind] of C.provenNow(base).guard) {
+        const s = structuredClone(base);
+        const l = sting(s, g);
+        assert.equal(l.kind, 'proven-guard');
+        assert.equal(s.cells[g], kind === C.QUEEN ? C.Q : C.G);
+        const generic = `These numbers proved a ${kind === C.QUEEN ? "queen's guard" : 'guard'} was sleeping there.`;
+        if (kind === C.QUEEN) seen.queen++;
+        const [c] = l.clues;
+        const full = l.clues.length === 1 && !s.broken[c]
+          && s.shown[c] + s.shownH[c] === nb[c].filter((j) => j === g || !s.open[j]).length;
+        if (!full) { assert.equal(l.text, generic); seen.generic++; continue; }
+        const n = s.shown[c] + s.shownH[c];
+        assert.match(l.text, n === 1 ? /^This (amber |red )?1 had just one capped neighbour, the cell you uncapped\.$/
+          : /^This (amber |red )?\d had just \w+ capped neighbours, so every one of them hid a (guard|queen's guard), the cell you uncapped too\.$/);
+        seen[n === 1 ? 'one' : 'many']++;
+      }
+    }
+  }
+  assert.ok(seen.one && seen.many && seen.generic && seen.queen, JSON.stringify(seen));
+});

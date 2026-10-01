@@ -48,6 +48,9 @@ const SHAKE_MS = 240, WING_MS = 40, FLASH_MS = 420, FLASH_STILL_MS = 300;
 const HOLD_SHOW = 120;           // a press younger than this is likely a tap: no ring yet
 const POUR_CELL_MS = 160;
 const GLINT_MS = 300;
+const LESSON_MS = 320;          // a sting lesson's rings fade in; the frame lifts as long
+// a sting lesson's ring colours (#04): the proof, the sting, a cell that was safe
+const RING = { honey: C.cap, red: C.queen, safe: '#fff1c4' };
 const FONT = 'ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif';
 
 /* A small fixed stream per cell, for shapes that must look the same from
@@ -82,6 +85,10 @@ export function createRenderer(canvas) {
     hold: null,                  // the press under way (input.js pressing()), set before each draw
     wakeAt: Infinity,            // motion off: when the showing still ends
     mode: 'play',                // tints the stung / won board
+    rings: [],                   // [{ i, color }] — the sting lesson; main clears them with the sheet
+    ringsAt: -1,
+    lift: { from: 0, to: 0, at: -1 },   // the frame slides up so a docked sheet clears the rings
+    dy: 0,                       // the lift right now
   };
   let sprites = null;
 
@@ -219,11 +226,46 @@ export function createRenderer(canvas) {
 
   const at = (i) => {
     const c = centre(i, layout.cols, layout.r);
-    return { x: layout.ox + c.x, y: layout.oy + c.y };
+    return { x: layout.ox + c.x, y: layout.oy + view.dy + c.y };
   };
 
   function cellAt(x, y) {
-    return hexAt(x - layout.ox, y - layout.oy, layout.cols, layout.rows, layout.r);
+    return hexAt(x - layout.ox, y - layout.oy - view.dy, layout.cols, layout.rows, layout.r);
+  }
+
+  /** Slide the frame by dy (negative is up), eased; instant without motion
+   *  or when now < 0 (a resize). */
+  function lift(dy, now) {
+    const snap = !view.motion || now < 0;
+    view.lift = { from: view.dy, to: dy, at: snap ? -1 : now };
+    if (snap) view.dy = dy;
+  }
+
+  /* The sting lesson's rings: a honey (or red, or pale) hex behind the cell,
+   * showing as a halo in the gaps, and a 2.5 px outline on the cell's own
+   * edge so it reads on dark comb and bright caps alike. */
+  function ringPass(behind, alpha) {
+    const r = layout.r;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    for (const g of view.rings) {
+      const { x, y } = at(g.i);
+      const col = RING[g.color] || RING.honey;
+      if (behind) {
+        hexPath(ctx, x, y, r * 1.1);
+        ctx.fillStyle = col;
+        ctx.shadowColor = col;
+        ctx.shadowBlur = g.color === 'safe' ? r * 0.6 : r * 0.3;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      } else {
+        hexPath(ctx, x, y, r * 0.94 - 1.25);
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
   }
 
   function blit(img, x, y) {
@@ -482,6 +524,19 @@ export function createRenderer(canvas) {
       return true;
     };
     const r = layout.r;
+    // the lift: eased, or already there without motion
+    const L = view.lift;
+    if (L.at >= 0) {
+      const t = view.motion ? Math.min(1, (now - L.at) / LESSON_MS) : 1;
+      view.dy = L.from + (L.to - L.from) * (1 - (1 - t) ** 3);
+      if (t < 1) moving = true; else L.at = -1;
+    }
+    // the rings fade in with motion, and are simply there without it
+    let ringAlpha = 1;
+    if (view.rings.length && view.motion && view.ringsAt >= 0) {
+      ringAlpha = Math.min(1, (now - view.ringsAt) / LESSON_MS);
+      if (ringAlpha < 1) moving = true;
+    }
     const over = s.phase !== 'play';
     const n = s.cols * s.rows;
     const nbrs = nbrsOf(s.cols, s.rows);
@@ -494,6 +549,7 @@ export function createRenderer(canvas) {
       if (t < 1) { dx = shake(t, 6, 2); moving = true; }
     }
     ctx.setTransform(d, 0, 0, d, dx * d, 0);
+    if (view.rings.length) ringPass(true, ringAlpha);
 
     // a lifted or shaking number is drawn last, on top, so its slot waits
     const sw = view.sweep, lift = sw && !still ? (now - sw.at) / LIFT_MS : 1;
@@ -551,6 +607,7 @@ export function createRenderer(canvas) {
         }
       }
     }
+    if (view.rings.length) ringPass(false, ringAlpha);
 
     // sweep: the number lifts, and a light runs clockwise round it
     if (sw) {
@@ -707,6 +764,6 @@ export function createRenderer(canvas) {
 
   return {
     resize, draw, cellAt, at, layout, view,
-    reset, uncapped, swept, refused, marked, stung, won, glint,
+    reset, uncapped, swept, refused, marked, stung, won, glint, lift,
   };
 }

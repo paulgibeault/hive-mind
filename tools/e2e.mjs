@@ -55,6 +55,17 @@ async function solverClear() {
   await waitMode('won');
 }
 const railReads = () => page.textContent('#hud-reads');
+/* The sting lesson's rings sit clear of the stung sheet and the rail (#04). */
+const ringsClear = () => H(() => {
+  const h = window.__hive, r = h.layout.r * 0.9;
+  const sheet = document.getElementById('lost'), rail = document.getElementById('rail');
+  const top = sheet.classList.contains('top') ? sheet.offsetTop + sheet.offsetHeight : rail.offsetTop + rail.offsetHeight;
+  const bottom = sheet.classList.contains('top') ? innerHeight : sheet.offsetTop;
+  return h.view.rings.length > 0 && h.view.rings.every((g) => {
+    const { y } = h.at(g.i);
+    return y - r >= top - 1 && y + r <= bottom + 1;
+  });
+});
 
 await page.goto(url);
 await page.waitForFunction(() => window.__hive);
@@ -156,22 +167,102 @@ assert.equal(await page.textContent('#lost-title'), "Stung by a queen's guard");
 await page.waitForTimeout(500);
 await shot('4-stung-queen');
 
-// a sting: new Clover Field frame, uncap a guard
+// a sting: new Clover Field frame, uncap a guard nothing proved — a guess,
+// and the lesson says so and shows a cell that was safe (#04)
 await page.click('#lost-menu');
 await page.click('#hive button:nth-child(1)');
 await page.click('#play');
 await waitMode('play');
-const guard = await H(() => window.__hive.s.cells.indexOf(1));
+const [guard, safeBefore] = await H(() => {
+  const h = window.__hive, p = h.Core.provenNow(h.s);
+  return [h.s.cells.findIndex((c, i) => c === 1 && !p.guard.has(i)), [...p.safe]];
+});
 await tapCell(guard);
 await waitMode('lost');
 assert.equal(await page.textContent('#lost-title'), 'Stung');
+assert.equal(await H(() => window.__hive.lesson.kind), 'guess');
+assert.equal(await page.textContent('#lesson-text'), 'That was a guess, and nothing proved it either way. This cell was safe to open:');
+assert.equal(await H(() => window.__hive.lesson.safeHint), safeBefore[0], 'the first cell provenNow called safe');
+assert.deepEqual(await H(() => window.__hive.view.rings), [{ i: safeBefore[0], color: 'safe' }, { i: guard, color: 'red' }]);
 await page.waitForTimeout(500);
+assert.ok(await ringsClear(), 'the sheet does not cover the rings');
 await shot('4-stung');
 assert.equal(await H(() => Arcade.state.get('run')), null, 'a stung frame is not resumable');
 const seed = await H(() => window.__hive.s.seed);
 await page.click('#retry');
 await waitMode('play');
 assert.equal(await H(() => window.__hive.s.seed), seed, 'same frame again');
+assert.deepEqual(await H(() => [window.__hive.view.rings.length, window.__hive.view.dy]), [0, 0], 'the rings go with the sheet');
+
+// a sweep over a wrong mark: mark a safe cell in place of a guard around a
+// low number, sweep it, and the lesson rings the number (#04). Played down
+// into the bottom third first, under where the sheet docks, so the frame
+// has to make room for the rings.
+const lowOne = () => H(() => {
+  const { s, Core } = window.__hive, nb = Core.nbrsOf(s.cols, s.rows);
+  for (let c = s.open.length - 1; c >= s.cols * Math.ceil(s.rows * 2 / 3); c--) {
+    if (!s.open[c] || s.shown[c] !== 1) continue;
+    const safe = nb[c].find((j) => !s.open[j] && s.cells[j] === 0);
+    if (safe !== undefined) return { c, safe };
+  }
+  return null;
+});
+let wrong = await lowOne();
+for (let k = 0; k < 60 && !wrong; k++) { await tapCell((await provenSafe())[0]); wrong = await lowOne(); }
+assert.ok(wrong, 'a 1 in the bottom third with a capped safe neighbour');
+await holdCell(wrong.safe);
+await tapCell(wrong.c);
+await waitMode('lost');
+assert.equal(await H(() => window.__hive.lesson.kind), 'wrong-mark');
+assert.equal(await page.textContent('#lesson-text'), 'A mark was on a safe cell, so the sweep trusted it.');
+assert.deepEqual(await H(() => window.__hive.view.rings),
+  [{ i: wrong.c, color: 'honey' }, { i: await H(() => window.__hive.s.stung), color: 'red' }]);
+assert.equal(await H((i) => window.__hive.s.mark[i], wrong.safe), 1, 'the wrong mark stays, and gets its ✕');
+await page.waitForTimeout(500);
+assert.ok(await ringsClear(), 'the sheet does not cover the rings');
+await shot('4-stung-wrong-mark');
+
+// the pinned example (Clover Field seed 7, the canvas's mid-game state):
+// tapping 49 is the proven-guard case, ringed by [48] — and with reduced
+// motion the rings are simply there, no fade
+await page.emulateMedia({ reducedMotion: 'reduce' });
+await H(() => {
+  const PLAY_PROPOSED = 'cccwwcccwccwwcccwcccwccccccccccwwwcwccwc3cwcccwc1m22wccc11011ccc110001mcw10001cccc11001mccw101ccccm201w1cc100110cm100000';
+  const s = window.__hive.Core.newGame('clover', 7);
+  [...PLAY_PROPOSED].forEach((ch, i) => { if (/\d/.test(ch)) s.open[i] = 1; if (ch === 'm') s.mark[i] = 1; });
+  Arcade.state.set('run', { s, ms: 83000, daily: null, reads: { clean: 14, lucky: 0, hints: 0, puffs: 0 } });
+});
+await page.reload();
+await page.waitForFunction(() => window.__hive);
+await page.click('#continue');
+await page.click('#resume');
+await waitMode('play');
+assert.equal(await railReads(), '14 clean · pure');
+assert.equal(await H(() => window.__hive.view.motion), false);
+await holdCell(49);                               // lift the canvas's mark, then tap it anyway
+assert.equal(await H(() => window.__hive.s.mark[49]), 0);
+await tapCell(49);
+await waitMode('lost');
+await page.waitForTimeout(60);                    // one frame or so
+assert.deepEqual(await H(() => [window.__hive.lesson.kind, window.__hive.lesson.clues]), ['proven-guard', [48]]);
+assert.equal(await page.textContent('#lesson-text'), 'This 1 had just one capped neighbour, the cell you uncapped.');
+assert.deepEqual(await H(() => window.__hive.view.rings), [{ i: 48, color: 'honey' }, { i: 49, color: 'red' }]);
+// the honey outline is drawn at full strength straight away
+const ringPx = await H(() => {
+  const h = window.__hive, { x, y } = h.at(48), r = h.layout.r, cv = document.getElementById('view');
+  const d = cv.width / cv.clientWidth, k = r * 0.94 - 1.25;
+  const px = cv.getContext('2d').getImageData(Math.round((x - k * Math.cos(Math.PI / 6)) * d), Math.round(y * d), 1, 1).data;
+  return [...px];
+});
+assert.ok(ringPx[0] > 200 && ringPx[1] > 140 && ringPx[2] < 120, `honey ring at full strength, got ${ringPx}`);
+assert.ok(await ringsClear(), 'the sheet does not cover the rings');
+await shot('4-stung-proven-guard');
+await page.emulateMedia({ reducedMotion: null });
+// the game reads the setting at boot; put motion back for the blocks after
+// this one (the juice pass's ripple checks need it on)
+await H(() => { window.__hive.view.motion = true; });
+await page.click('#retry');
+await waitMode('play');
 
 // Wildflowers: broken comb shows up once uncapped
 await page.click('#pause'); await page.click('#quit');

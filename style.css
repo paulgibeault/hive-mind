@@ -209,6 +209,25 @@ h2 { font-size: 30px; }
   font-weight: 800; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase;
 }
 .seal svg { width: 28px; height: 31px; flex: none; }
+.lesson {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(242, 179, 61, 0.35);
+  background: rgba(59, 43, 25, 0.75);
+}
+.lesson p { margin: 4px 0 0; font-size: 16px; line-height: 1.4; }
+/* the stung sheet docks to the top when the lesson's rings sit low and tall */
+.sheet.dock.top {
+  inset: 0 0 auto 0;
+  justify-content: flex-start;
+  padding-top: calc(16px + env(safe-area-inset-top));
+  padding-bottom: 40px;
+  background: linear-gradient(to bottom, rgba(23, 17, 10, 0.97) 75%, rgba(23, 17, 10, 0));
+  animation-name: drop;
+}
+@keyframes drop { from { transform: translateY(-24px); opacity: 0; } }
+/* the frame slid up under the rail: give the rail a backdrop */
+.lifted .rail { background: linear-gradient(to bottom, rgba(23, 17, 10, 0.97) 80%, rgba(23, 17, 10, 0)); }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 @media (prefers-reduced-motion: reduce) {
