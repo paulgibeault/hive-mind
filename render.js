@@ -458,9 +458,9 @@ export function createRenderer(canvas) {
     if (ink === 'dim') ctx.globalAlpha = 0.35;
     if (isScout(s, i)) {
       // a Scout: the double rim, and its number (0 too) in a lighter weight,
-      // a little smaller so it sits inside the inner rim
+      // a touch smaller so a two-digit reading still sits inside the inner rim
       scoutRim(x, y, r, honey);
-      ctx.font = `500 ${Math.round(r * 0.74)}px ${FONT}`;
+      ctx.font = `600 ${Math.round(r * 0.84)}px ${FONT}`;
       ctx.fillStyle = honey ? C.dark : C.ink;
       ctx.fillText(String(w), x, y + r * 0.04);
     } else if (s.queens > 0) {
