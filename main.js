@@ -14,6 +14,8 @@ import { initAudio, sfx, sfxReset, cueContext } from './audio.js';
 import { refused } from './juice.js';
 import * as Reads from './reads.js';
 import * as Hint from './hint.js';
+import { honeyColour, HONEY } from './honey.js';
+import * as Pantry from './pantry.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -63,7 +65,7 @@ function runClock(on) {
 function paintClock() { $('hud-clock').textContent = fmt(elapsed()); }
 
 // ── sheets ───────────────────────────────────────────────────────────────
-const SHEETS = ['menu', 'paused', 'won', 'lost'];
+const SHEETS = ['menu', 'paused', 'won', 'lost', 'pantry'];
 function show(next) {
   if (next !== 'play') unhint();          // a hint lives only over a live frame (#07)
   mode = next;
@@ -86,18 +88,6 @@ function frame() {
 function rest(ms) {
   if (wake) { wake.cancel(); wake = null; }
   if (Number.isFinite(ms)) wake = Arcade.session.setTimeout(() => { wake = null; kick(); }, Math.max(0, ms) + 1);
-}
-
-// PLACEHOLDER until #09: honey.js's honeyColour(hive, seed) replaces this
-// whole function (same signature, same { top, bottom }). Clover Field and
-// Apple Orchard are #09's colours; Wildflowers stands in a seeded amber-to-
-// russet blend for the real one.
-function honeyColour(hive, seed) {
-  if (hive === 'clover') return { top: '#fff0b8', bottom: '#fbe7a1' };
-  if (hive === 'apple') return { top: '#e8a846', bottom: '#dd9a38' };
-  const h = Math.imul((seed >>> 0) ^ 0x9e3779b9, 2654435761) >>> 0;
-  const hue = 18 + (h % 23), light = 38 + ((h >>> 8) % 13);
-  return { top: `hsl(${hue + 4} 72% ${light + 8}%)`, bottom: `hsl(${hue} 70% ${light}%)` };
 }
 
 // ── the rail ─────────────────────────────────────────────────────────────
@@ -197,11 +187,13 @@ function paintDaily() {
   const log = dailyLog();
   const done = log[t.date];
   const hive = Core.hiveById(t.hive);
-  $('daily-note').textContent = `Daily frame · ${t.date}`;
+  $('daily-note').textContent = `Daily · ${Pantry.dayDate(t.date)}`;
   $('daily-title').textContent = done ? `${hive.name} — cleared` : `Today: ${hive.name}`;
   $('daily-time').textContent = done ? fmtExact(done.ms) : '';
   $('daily').classList.toggle('done', !!done);
-  return streak(log, t.date);
+  const n = streak(log, t.date);
+  paintComb(t.date, log, n, !!done);                 // #09
+  return n;
 }
 
 // ── records ──────────────────────────────────────────────────────────────
@@ -209,11 +201,11 @@ function renderBest() {
   const hive = Core.HIVES[prefs.hive];
   const best = Arcade.records.get(`time-${hive.id}`);
   const k = (Arcade.stats.getOrInit('frames', {})[hive.id]) || { played: 0, won: 0 };
-  const n = paintDaily();
+  paintDaily();
+  paintPantryStrip();                                // #09
   const bits = [];
   if (best) bits.push(`${hive.name} best ${fmtExact(best.value)}`);
   if (k.played) bits.push(`${k.won} of ${k.played} cleared`);
-  if (n > 1) bits.push(`${n}-day streak`);
   $('best').textContent = bits.join(' · ');
 }
 
@@ -233,7 +225,6 @@ function recordWin() {
     });
     bump(hive.id, 'pure');
   }
-  let note = '';
   if (daily) {
     // the day keeps its fastest clear; `pure` says whether any clear that
     // day was Pure
@@ -243,9 +234,8 @@ function recordWin() {
       const best = was && was.ms <= ms ? was : { ms, hive: hive.id };
       return { ...log, [date]: { ...best, pure: pure || !!(was && was.pure) } };
     });
-    note = `Daily frame · ${daily}`;
-  } else note = hive.name;
-  $('won-note').textContent = note;
+  }
+  fillJar(ms, pure);                                 // #09: the jar, and the caption
   $('won-time').textContent = fmtExact(ms);
   $('won-best').textContent = !prev ? 'First clear' : ms < prev.value ? `New best — was ${fmtExact(prev.value)}` : `Best ${fmtExact(prev.value)}`;
   $('won-code').textContent = Core.boardCode(s.hive, s.seed);
@@ -255,6 +245,249 @@ function recordWin() {
   $('won-pure').hidden = !pure;
   $('won-help').textContent = Hint.costLine(reads.hints);   // #07
   $('won-help').hidden = !reads.hints;
+}
+
+// ── the pantry and the comb calendar (#09) ──────────────────────────────
+// Every win fills a jar in Arcade.stats('pantry') (pantry.js keeps the
+// shape), coloured by honey.js. The jars live on the menu's pantry strip, the
+// hive buttons, the pantry sheet and the won sheet; the daily strip draws the
+// month as comb. All of it is after a win or outside play: honey colour is
+// never shown for a frame still being played.
+const QUEEN = { id: 'queen', name: "Queen's Frame" };    // #10's hive, until core has it
+const JAR_CLINK_MS = 1100;          // the won sheet's jar has filled: it clinks
+const SVGNS = 'http://www.w3.org/2000/svg';
+let picked = null;                  // the jar the pantry's detail card shows
+let clink = null;
+
+const pantryNow = () => Pantry.normalize(Arcade.stats.get('pantry'));
+const shelfHives = () => {
+  const list = Core.HIVES.map((h) => ({ id: h.id, name: h.name }));
+  return list.some((h) => h.id === QUEEN.id) ? list : [...list, QUEEN];
+};
+const hiveName = (id) => (shelfHives().find((h) => h.id === id) || { name: id }).name;
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const jarLabel = (j) => [hiveName(j.hive), Pantry.shortDate(j.date), fmt(j.ms), j.pure && 'pure'].filter(Boolean).join(', ');
+
+/** A jar of this frame's honey: a lid, the glass and its honey, and a wax seal if Pure. */
+function jarEl(hive, seed, opts = {}) {
+  const el = document.createElement(opts.button ? 'button' : 'span');
+  el.className = `jar${opts.cls ? ` ${opts.cls}` : ''}`;
+  const c = honeyColour(hive, seed);
+  el.style.setProperty('--top', c.top);
+  el.style.setProperty('--bottom', c.bottom);
+  el.innerHTML = '<i class="lid"></i><i class="glass"><i class="honey"></i></i>';   // our own constant markup
+  if (opts.pure) { const w = document.createElement('i'); w.className = 'wax'; el.append(w); }
+  if (opts.button) el.type = 'button'; else el.setAttribute('aria-hidden', 'true');
+  return el;
+}
+
+/** A hive's flower swatch: a hex of its honey (Wildflowers shows three blends). */
+function swatch(id) {
+  const i = document.createElement('i');
+  i.className = 'swatch';
+  i.setAttribute('aria-hidden', 'true');
+  const c = honeyColour(id, 1);
+  const tones = id === 'wildflowers' ? [11, 5, 23].map((k) => honeyColour(id, k).bottom) : [c.top, c.bottom];
+  i.style.background = `linear-gradient(135deg, ${tones.join(', ')})`;
+  return i;
+}
+
+/* Into the pantry on a win, and the won sheet's jar fills with it. */
+function fillJar(ms, pure) {
+  let r = null;
+  Arcade.stats.update('pantry', (prev) => {
+    r = Pantry.addJar(prev, {
+      hive: s.hive, seed: s.seed, ms, pure, clean: reads.clean, hints: reads.hints, puffs: reads.puffs,
+      date: Arcade.daily.dateStr(),
+    });
+    return r.pantry;
+  });
+  const jar = jarEl(s.hive, s.seed, { cls: `big${R.view.motion ? ' fill' : ''}` });
+  $('won-jar').replaceChildren(jar, $('won-pure'));
+  $('won-note').textContent = [daily && 'Daily', pure && 'Pure', `jar ${r.jar.n}`,
+    (HONEY[s.hive] || HONEY.clover).name].filter(Boolean).join(' · ');
+  // the clink once the jar has filled; a Pure jar is pressed with its seal
+  if (clink) clink.cancel();
+  clink = Arcade.session.setTimeout(() => {
+    clink = null;
+    if (mode === 'won') sfx('jar', cue({ kind: pure ? 'seal' : undefined }));
+  }, JAR_CLINK_MS);
+}
+
+// ── the menu: the comb calendar, the pantry strip, the hive buttons' jars
+function paintComb(date, log, n, doneToday) {
+  const m = Pantry.combMonth(date, log);
+  const svg = $('month-comb');
+  svg.replaceChildren();
+  if (!m) return;
+  const r = 13, w = Math.sqrt(3) * r, k = 0.92;
+  const rows = Math.ceil((m.lead + m.days.length) / 7);
+  const W = w * 7.5, H = r * 2 + 1.5 * r * (rows - 1);
+  svg.setAttribute('viewBox', `0 0 ${W.toFixed(1)} ${H.toFixed(1)}`);
+  const hex = (cx, cy, rr) => Array.from({ length: 6 }, (_, j) => {
+    const a = Math.PI / 3 * j - Math.PI / 2;
+    return `${(cx + rr * Math.cos(a)).toFixed(1)},${(cy + rr * Math.sin(a)).toFixed(1)}`;
+  }).join(' ');
+  for (const d of m.days) {
+    const slot = m.lead + d.day - 1, x = slot % 7, y = Math.floor(slot / 7);
+    const cx = w * (x + 0.5 + (y & 1 ? 0.5 : 0)), cy = r + 1.5 * r * y;
+    const p = document.createElementNS(SVGNS, 'polygon');
+    p.setAttribute('points', hex(cx, cy, r * k));
+    p.setAttribute('class', `day ${d.state}${d.cleared ? ' cleared' : ''}`);
+    svg.append(p);
+    if (d.pure) {
+      const c = document.createElementNS(SVGNS, 'circle');
+      c.setAttribute('cx', cx.toFixed(1)); c.setAttribute('cy', cy.toFixed(1)); c.setAttribute('r', '3.6');
+      c.setAttribute('class', 'seal-dot');
+      svg.append(c);
+    }
+  }
+  const past = m.days.filter((d) => d.state !== 'future').length;
+  $('daily-streak').textContent = n > 1 ? `${n}-day streak.${doneToday ? '' : ' Keep it going.'}`
+    : n === 1 ? `1-day streak.${doneToday ? '' : ' Keep it going.'}` : "Clear today's to start a streak.";
+  svg.setAttribute('aria-label', `${m.name}: ${m.cleared} of ${plural(past, 'day')} cleared`
+    + `${m.pure ? `, ${m.pure} of them Pure` : ''}. ${n ? `${n}-day streak.` : 'No streak yet.'}`);
+}
+
+function paintPantryStrip() {
+  const p = pantryNow();
+  const t = Pantry.totals(p);
+  $('pantry-sum').textContent = t.jars ? `${plural(t.jars, 'jar')} · ${t.pure} sealed` : 'empty';
+  const shelf = $('pantry-mini');
+  shelf.replaceChildren();
+  const jars = Pantry.recent(p, 24).reverse();       // newest first; the CSS draws it on the right
+  for (const j of jars) {
+    const el = jarEl(j.hive, j.seed, { cls: 'mini', pure: j.pure });
+    el.style.setProperty('--h', `${38 + (j.n % 3) * 6}px`);
+    shelf.append(el);
+  }
+  if (!jars.length) {
+    const e = document.createElement('span');
+    e.className = 'slot-empty mini';
+    const words = document.createElement('span');
+    words.className = 'empty-note';
+    words.textContent = 'Clear a frame to fill your first jar.';
+    shelf.append(words, e);                         // reversed by the CSS
+  }
+  $('pantry-open').setAttribute('aria-label',
+    `The pantry: ${t.jars ? `${plural(t.jars, 'jar')}, ${t.pure} sealed Pure` : 'no jars yet'}`);
+}
+
+function paintHiveJars() {
+  const p = pantryNow();
+  [...$('hive').children].forEach((b, i) => {
+    b.querySelector('.jars span').textContent = plural(Pantry.countsOf(p, Core.HIVES[i].id).jars, 'jar');
+  });
+}
+
+// ── the pantry sheet ─────────────────────────────────────────────────────
+function openPantry() {
+  const p = pantryNow();
+  const t = Pantry.totals(p);
+  $('pantry-count').textContent = t.jars ? `${plural(t.jars, 'jar')} · ${t.pure} sealed Pure` : 'No jars yet';
+  const shelves = $('shelves');
+  shelves.replaceChildren();
+  let newest = null;
+  for (const h of shelfHives()) {
+    const c = Pantry.countsOf(p, h.id), jars = Pantry.jarsOf(p, h.id);
+    const box = document.createElement('section');
+    box.className = 'shelf-box';
+    const head = document.createElement('div');
+    head.className = 'shelf-head';
+    const title = document.createElement('h3');
+    title.id = `shelf-${h.id}`;
+    title.append(swatch(h.id), h.name);
+    const note = document.createElement('span');
+    note.textContent = `${(HONEY[h.id] || HONEY.clover).note} · ${c.jars}`;
+    head.append(title, note);
+    const shelf = document.createElement('div');
+    shelf.className = 'shelf';
+    shelf.setAttribute('role', 'group');
+    shelf.setAttribute('aria-labelledby', title.id);
+    if (c.older) {
+      const o = document.createElement('span');
+      o.className = 'older mono';
+      o.textContent = `+${c.older} older`;
+      shelf.append(o);
+    }
+    for (const j of jars) {
+      const b = jarEl(j.hive, j.seed, { button: true, pure: j.pure });
+      b.setAttribute('aria-label', jarLabel(j));
+      b.tabIndex = -1;
+      b.addEventListener('click', () => pickJar(j, b));
+      shelf.append(b);
+      if (!newest || j.n > newest.jar.n) newest = { jar: j, el: b };
+    }
+    if (jars.length) shelf.lastElementChild.tabIndex = 0;      // roving: one tab stop per shelf
+    else {
+      const e = document.createElement('span');
+      e.className = 'slot-empty';
+      const words = document.createElement('span');
+      words.className = 'empty-note';
+      words.textContent = h.id === QUEEN.id ? 'The weekly frame. Its jar waits here.' : 'No jars yet.';
+      shelf.append(e, words);
+    }
+    box.append(head, shelf);
+    shelves.append(box);
+  }
+  show('pantry');
+  $('pantry').scrollTop = 0;
+  if (newest) pickJar(newest.jar, newest.el);
+  else { picked = null; $('jar-detail').hidden = true; }
+  $('pantry-back').focus();
+}
+
+function pickJar(j, el) {
+  picked = j;
+  for (const b of $('shelves').querySelectorAll('.jar[aria-pressed="true"]')) b.setAttribute('aria-pressed', 'false');
+  el.setAttribute('aria-pressed', 'true');
+  for (const b of el.parentNode.querySelectorAll('.jar')) b.tabIndex = b === el ? 0 : -1;
+  $('jar-detail').hidden = false;
+  $('detail-jar').replaceChildren(jarEl(j.hive, j.seed, { cls: 'big', pure: j.pure }));
+  $('detail-note').textContent = `${hiveName(j.hive)} · ${Pantry.shortDate(j.date)}${j.pure ? ' · Pure' : ''}`;
+  $('detail-code').textContent = j.code;
+  $('detail-line').textContent = [fmtExact(j.ms), `${j.clean} clean`, plural(j.hints, 'hint'), plural(j.puffs, 'puff')].join(' · ');
+  $('detail-words').textContent = (j.hive === 'wildflowers' ? "This blend came from the frame's own seed. " : '')
+    + (j.pure ? 'Sealed Pure: every cell read clean.' : 'Replay the code to try for the seal.');
+}
+
+/* Arrow keys walk a shelf (up and down by a row of jars); Home and End jump. */
+function shelfKeys(e) {
+  const el = e.target;
+  if (!el.classList || !el.classList.contains('jar')) return;
+  const jars = [...el.parentNode.querySelectorAll('.jar')];
+  const i = jars.indexOf(el);
+  const perRow = jars.filter((b) => b.offsetTop === el.offsetTop).length || 1;
+  const to = { ArrowLeft: i - 1, ArrowRight: i + 1, Home: 0, End: jars.length - 1,
+    ArrowUp: i - perRow, ArrowDown: i + perRow }[e.key];
+  if (to === undefined) return;
+  e.preventDefault();
+  const next = jars[Math.max(0, Math.min(jars.length - 1, to))];
+  for (const b of jars) b.tabIndex = b === next ? 0 : -1;
+  next.focus();
+}
+
+/* Send a jar's code: the share sheet, else the clipboard and a toast. */
+async function sendJar(code) {
+  try {
+    // the SDK's share: navigator.share({ text }) standalone, the launcher's sheet when framed,
+    // and the clipboard with a toast where neither can
+    if (Arcade.ui && Arcade.ui.share) { await Arcade.ui.share({ text: code }); return; }
+    if (navigator.share) { await navigator.share({ text: code }); return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  try {
+    await navigator.clipboard.writeText(code);
+    Arcade.ui.toast(`Copied ${code}`);
+  } catch { Arcade.ui.toast(`Frame code ${code}`); }
+}
+
+function bindPantry(openMenu) {
+  $('pantry-open').addEventListener('click', openPantry);
+  $('pantry-back').addEventListener('click', openMenu);
+  $('shelves').addEventListener('keydown', shelfKeys);
+  $('pantry').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); openMenu(); } });
+  $('detail-replay').addEventListener('click', () => { if (picked) startFrame(picked.hive, picked.seed); });
+  $('detail-send').addEventListener('click', () => { if (picked) sendJar(picked.code); });
 }
 
 // ── the sting lesson (#04) ──────────────────────────────────────────────
@@ -528,7 +761,8 @@ function segmented(el, items, get, set) {
     marks.className = 'marks';
     marks.innerHTML = MARKS[it.id];                 // our own constant markup
     const small = document.createElement('small');
-    small.textContent = `${it.cols * it.rows} cells`;
+    small.className = 'jars';
+    small.append(swatch(it.id), document.createElement('span'));   // filled by paintHiveJars (#09)
     b.append(marks, it.name, small);
     b.addEventListener('click', () => { set(i); paint(); });
     el.append(b);
@@ -589,7 +823,7 @@ async function boot() {
       $('continue-note').textContent = `${stung ? 'Stung' : 'In the smoker'} · ${fmt(run.ms || 0)}`;
       $('continue-title').textContent = run.daily ? `Back to the daily ${hive.name}` : `Back to the ${hive.name} frame`;
     }
-    paintHive(); renderBest();
+    paintHive(); renderBest(); paintHiveJars();
     unteach();
     s = null;
     show('menu');
@@ -627,6 +861,7 @@ async function boot() {
   $('lost-new').addEventListener('click', newFrame);
   $('lost-menu').addEventListener('click', () => { dropRun(); openMenu(); });
   $('puff').addEventListener('click', puff);
+  bindPantry(openMenu);                              // #09
 
   input = bindInput($('view'), {
     active: () => mode === 'play',
@@ -659,7 +894,7 @@ async function boot() {
     window.__hive = {
       get s() { return s; }, get mode() { return mode; }, get elapsed() { return elapsed(); }, get reads() { return reads; }, get lesson() { return lesson; },
       get frames() { return frames; }, get running() { return loop.running(); },
-      layout: R.layout, at: R.at, view: R.view, Core, today,
+      layout: R.layout, at: R.at, view: R.view, Core, today, Pantry, honeyColour,
     };
     Object.defineProperties(window.__hive, { hint: { get: () => hint }, lastTap: { get: () => lastTap } });
   }

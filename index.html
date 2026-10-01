@@ -60,10 +60,23 @@
 
       <button class="primary" id="play" type="button">Uncap a frame</button>
       <button class="strip daily" id="daily" type="button">
-        <span><span class="mono eyebrow" id="daily-note">Daily frame</span><span class="strip-title" id="daily-title">Today's frame</span></span>
-        <span class="mono daily-time" id="daily-time"></span>
+        <svg class="comb-cal" id="month-comb" role="img" aria-label="This month's comb"></svg>
+        <span class="daily-words">
+          <span class="mono eyebrow" id="daily-note">Daily frame</span>
+          <span class="strip-title" id="daily-title">Today's frame</span>
+          <span class="daily-streak" id="daily-streak"></span>
+          <span class="mono daily-time" id="daily-time"></span>
+        </span>
       </button>
       <p class="best mono" id="best"></p>
+
+      <button class="pantry-strip" id="pantry-open" type="button">
+        <span class="pantry-strip-head" aria-hidden="true">
+          <span class="mono label">The pantry</span>
+          <span class="mono pantry-sum" id="pantry-sum"></span>
+        </span>
+        <span class="mini-shelf" id="pantry-mini" aria-hidden="true"></span>
+      </button>
 
       <details class="how">
         <summary>How it works</summary>
@@ -96,12 +109,15 @@
     </section>
 
     <section class="sheet dock" id="won" hidden>
-      <span class="mono eyebrow" id="won-note"></span>
       <div class="won-head">
-        <h2>Honey taken</h2>
-        <span class="seal" id="won-pure" hidden>
-          <svg viewBox="0 0 40 44" aria-hidden="true"><path d="M20 2l17 10v20L20 42 3 32V12z" fill="#c9801a"/><path d="M20 6.5l13.2 7.7v15.6L20 37.5 6.8 29.8V14.2z" fill="#f2b33d" stroke="#2a1d10" stroke-opacity=".35" stroke-width="1.4"/><path d="M13 22.5l5 5 9-10" fill="none" stroke="#2a1d10" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Pure</span>
+        <span class="won-jar" id="won-jar">
+          <span class="seal-badge" id="won-pure" role="img" aria-label="Pure" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="#ffd978" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+        </span>
+        <span class="won-title">
+          <span class="mono eyebrow" id="won-note"></span>
+          <h2>Honey taken</h2>
         </span>
       </div>
       <p class="result mono"><span id="won-time"></span><span class="result-best" id="won-best"></span></p>
@@ -142,10 +158,41 @@
       </div>
       <button class="ghost" id="lost-menu" type="button">Menu</button>
     </section>
+
+    <section class="sheet pantry" id="pantry" hidden aria-labelledby="pantry-title">
+      <header class="pantry-head">
+        <button class="tool" id="pantry-back" type="button" aria-label="Back to the menu">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <span class="pantry-titles">
+          <h2 id="pantry-title">The pantry</h2>
+          <span class="mono pantry-count" id="pantry-count"></span>
+        </span>
+      </header>
+      <div class="shelves" id="shelves"></div>
+      <section class="jar-detail" id="jar-detail" aria-live="polite" aria-labelledby="detail-code" hidden>
+        <div class="detail-top">
+          <span class="detail-jar" id="detail-jar"></span>
+          <span class="detail-words">
+            <span class="mono eyebrow" id="detail-note"></span>
+            <span class="detail-title">Jar of <b class="mono" id="detail-code"></b></span>
+            <span class="mono detail-line" id="detail-line"></span>
+          </span>
+        </div>
+        <p class="detail-say" id="detail-words"></p>
+        <div class="row">
+          <button class="primary" id="detail-replay" type="button">Replay frame</button>
+          <button class="ghost" id="detail-send" type="button">Send to a friend</button>
+        </div>
+      </section>
+    </section>
   </main>
 
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <defs>
+      <linearGradient id="honey-day" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ffd978"/><stop offset=".5" stop-color="#f2b33d"/><stop offset="1" stop-color="#c9801a"/>
+      </linearGradient>
       <g id="comb">
         <path d="M32 6l13 7.5v15L32 36l-13-7.5v-15z" fill="#f2b33d"/>
         <path d="M18 30l13 7.5v15L18 60 5 52.5v-15z" fill="#c9801a"/>

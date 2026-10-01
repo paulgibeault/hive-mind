@@ -88,6 +88,11 @@ again until nothing more follows.
    counts go in `Arcade.stats('frames')`. Since #03, a **Pure** clear (no
    lucky uncaps, hints or smoke) also sets `pure-time-<hive>`, bumps a `pure`
    count in the same stat, and marks the daily entry `pure: true`.
+   Since #09, every clear also fills a **jar** in `Arcade.stats('pantry')`
+   (`pantry.js`: per hive the newest 200 jars whole, older ones as counts; a
+   replayed code updates its jar). Its colour is `honey.js`'s
+   `honeyColour(hive, seed)`, which also tints the win's pour and pitches the
+   jar's clink. Old saves get no jars backfilled.
 7. **Frame codes** (`AP-0000ABC`): the hive plus the seed in base 36, shown on
    the pause and win sheets (the rail's second line is the clean-read count
    since #03), and typed into the menu. This is racing
