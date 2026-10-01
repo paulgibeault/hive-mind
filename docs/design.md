@@ -128,6 +128,15 @@ again until nothing more follows.
    move.
 6. **Old `WI-` codes open different frames now.** Broken comb changed how
    Wildflowers frames are drawn from a seed. Accepted before 1.0.
+7. **The smoker (#08); saves move to v3.** Each hive config carries `puffs`
+   (1 for all three). After a sting with a puff left, "Puff the smoker" calms
+   the guard (`core.calm`): its cell is capped again with the right mark,
+   +20 s goes on the clock, and the frame can't be Pure. The stung run is
+   kept (with its lesson) so a reload can still puff; Same frame, New frame
+   and Menu let it go. While a puff is left the stung board shows only the
+   guard that stung — no other guards, no ✕ on wrong marks — since play may
+   go on. v2 runs migrate with `puffs = 1`; a v2 save never held a stung run
+   (a sting dropped it), so a non-`play` v2 run is let go.
 
 ## Controls
 

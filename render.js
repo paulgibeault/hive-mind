@@ -12,6 +12,8 @@
  *   hold     a ring fills round the pressed cell, so long-press can be learned
  *   sting    the guard's wings flicker and the frame shakes, under the flash
  *   won      the guards seal under dark wax, and honey pours down the comb
+ *   smoke    the smoker calms a sting: grey haze swells and drifts off the
+ *            guard's cell as its cap goes back on (#08)
  *
  * Then the loop rests. Motion never blocks: core.js has already applied the
  * move, so only the drawing is staggered — a cell still drawn capped mid-
@@ -48,6 +50,7 @@ const SHAKE_MS = 240, WING_MS = 40, FLASH_MS = 420, FLASH_STILL_MS = 300;
 const HOLD_SHOW = 120;           // a press younger than this is likely a tap: no ring yet
 const POUR_CELL_MS = 160;
 const GLINT_MS = 300;
+const SMOKE_MS = 1100, SMOKE_STILL_MS = 600;
 const LESSON_MS = 320;          // a sting lesson's rings fade in; the frame lifts as long
 // a sting lesson's ring colours (#04): the proof, the sting, a cell that was safe
 const RING = { honey: C.cap, red: C.queen, safe: '#fff1c4' };
@@ -80,6 +83,7 @@ export function createRenderer(canvas) {
     refusal: null,               // { cell, at }: a sweep that couldn't fire
     pins: new Map(),             // cell → when its pin went in
     sting: null,                 // { cell, at }
+    smoke: null,                 // { cell, at }: the smoker's haze (#08)
     pour: null,                  // { at, honey }: the win's honey
     glints: [],                  // { cell, at, to }: sparks rising to the rail
     hold: null,                  // the press under way (input.js pressing()), set before each draw
@@ -272,6 +276,31 @@ export function createRenderer(canvas) {
     const s = img.width / layout.dpr;
     ctx.drawImage(img, x - s / 2, y - s / 2, s, s);
   }
+
+  /* The smoker's haze over cell i: soft grey puffs that swell, rise and
+   * fade (t 0..1). Still, it is one held cloud. */
+  function haze(i, t) {
+    const { x, y } = at(i), r = layout.r;
+    const rnd = cellRng(i, 0x5a0e);
+    // in fast, held while the cap goes back on, then thinning as it drifts up
+    const k0 = t < 0.12 ? t / 0.12 : t < 0.4 ? 1 : 1 - easeIn((t - 0.4) / 0.6);
+    ctx.save();
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 7) * Math.PI * 2 + rnd() * 0.8;
+      const d = k ? r * (0.3 + 0.3 * rnd()) * (0.7 + 0.6 * t) : 0;   // the first sits on the cell
+      const px = x + Math.cos(a) * d, py = y + Math.sin(a) * d * 0.7 - r * 0.7 * easeOut(t) * (0.5 + 0.5 * rnd());
+      const pr = r * (k ? 0.45 + 0.2 * rnd() : 0.8) * (0.85 + 0.6 * t);
+      const alpha = 0.78 * k0;
+      const g = ctx.createRadialGradient(px, py, 0, px, py, pr);
+      g.addColorStop(0, `rgba(196,190,180,${alpha})`);
+      g.addColorStop(0.55, `rgba(138,132,124,${alpha * 0.6})`);
+      g.addColorStop(1, 'rgba(120,114,106,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(px - pr, py - pr, 2 * pr, 2 * pr);
+    }
+    ctx.restore();
+  }
+
 
   // ── the marks and the guards ────────────────────────────────────────
   function bug(x, y, r, kind, startled = false) {
@@ -538,6 +567,10 @@ export function createRenderer(canvas) {
       if (ringAlpha < 1) moving = true;
     }
     const over = s.phase !== 'play';
+    // a stung frame shows every guard and every wrong mark — unless the
+    // smoker can still calm it (#08): then play may go on, so only the guard
+    // that stung is shown
+    const showAll = s.phase === 'won' || (s.phase === 'lost' && !(s.puffs > 0));
     const n = s.cols * s.rows;
     const nbrs = nbrsOf(s.cols, s.rows);
 
@@ -562,7 +595,7 @@ export function createRenderer(canvas) {
         if (!later(i) && openCell(s, nbrs, i, x, y, r, now)) moving = true;
         continue;
       }
-      const hazard = s.cells[i] !== EMPTY;
+      const hazard = s.cells[i] !== EMPTY && (showAll || i === s.stung);
       if (over && hazard && s.phase === 'won') {
         // a won frame seals its guards in; they sleep on
         blit(sprites.sealed, x, y);
@@ -596,7 +629,7 @@ export function createRenderer(canvas) {
         }
         markGlyph(x, y, r * k, s.mark[i]);
         ctx.globalAlpha = 1;
-        if (over && s.phase === 'lost') {
+        if (over && s.phase === 'lost' && showAll) {
           // a mark on a safe cell was wrong
           ctx.strokeStyle = C.dark;
           ctx.lineWidth = Math.max(2, r * 0.12);
@@ -691,6 +724,18 @@ export function createRenderer(canvas) {
       }
     }
 
+    // the smoker: haze over the calmed guard's cell (#08)
+    const sm = view.smoke;
+    if (sm) {
+      if (still) {
+        if (stillUntil(sm.at + SMOKE_STILL_MS)) haze(sm.cell, 0.25);
+        else view.smoke = null;
+      } else {
+        const t = (now - sm.at) / SMOKE_MS;
+        if (t < 1) { haze(sm.cell, clamp01(t)); moving = true; } else view.smoke = null;
+      }
+    }
+
     ctx.setTransform(d, 0, 0, d, 0, 0);
     if (st) {
       if (still) {
@@ -717,7 +762,7 @@ export function createRenderer(canvas) {
   /** A new frame, or a resumed one: nothing is mid-moment. */
   function reset() {
     view.anims.clear(); view.pins.clear();
-    view.sweep = view.refusal = view.sting = view.pour = view.hold = null;
+    view.sweep = view.refusal = view.sting = view.smoke = view.pour = view.hold = null;
     view.glints = [];
     if (sprites) sprites.honey = null;
   }
@@ -748,6 +793,9 @@ export function createRenderer(canvas) {
 
   function stung(i, now) { view.sting = { cell: i, at: now }; }
 
+  /** The smoker calmed the guard on cell i (#08): it's capped again, under haze. */
+  function smoked(i, now) { view.smoke = { cell: i, at: now }; view.sting = null; }
+
   /** The frame is won: honey { top, bottom } pours once the last cap is off. */
   function won(honey, now) {
     let start = now;
@@ -764,6 +812,6 @@ export function createRenderer(canvas) {
 
   return {
     resize, draw, cellAt, at, layout, view,
-    reset, uncapped, swept, refused, marked, stung, won, glint, lift,
+    reset, uncapped, swept, refused, marked, stung, smoked, won, glint, lift,
   };
 }
