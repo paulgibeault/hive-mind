@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as P from '../pantry.js';
 import { migrate } from '../migrate.js';
+import { finish } from '../ghost.js';
 
 const run = (over = {}) => ({
   hive: 'wildflowers', seed: 0x2a, ms: 228000, pure: false, clean: 61, hints: 1, puffs: 0, date: '2026-09-21', ...over,
@@ -71,13 +72,17 @@ test('per hive, the newest 200 jars stay whole and older ones fold into counts',
 
 test('600 jars store in under 50 KB', () => {
   let p = null;
-  // worst case for size: big seeds, long times, every count non-zero
+  // worst case for size: big seeds, long times, every count non-zero, and
+  // every jar a pace (#11) — of which each hive keeps GHOSTS
   for (let k = 0; k < 600; k++) {
+    const ms = 3599999 - k;
     p = P.addJar(p, {
-      hive: ['clover', 'apple', 'wildflowers'][k % 3], seed: 0xffffffff - k, ms: 3599999 - k,
+      hive: ['clover', 'apple', 'wildflowers'][k % 3], seed: 0xffffffff - k, ms,
       pure: k % 2 === 0, clean: 140 + (k % 9), hints: 1 + (k % 9), puffs: 1 + (k % 3), date: '2026-12-31',
+      timeline: Array.from({ length: 20 }, (_, i) => Math.round(ms * ((i + 1) / 20) ** 2)),
     }).pantry;
   }
+  assert.equal(Object.values(p.hives).reduce((n, h) => n + h.jars.filter((j) => j.g).length, 0), 3 * P.GHOSTS);
   assert.equal(P.totals(p).jars, 600);
   const bytes = Buffer.byteLength(JSON.stringify(p));
   assert.ok(bytes < 50 * 1024, `600 jars take ${bytes} bytes`);
@@ -140,4 +145,58 @@ test('the comb calendar: Monday first, cleared / pure / today / missed / future'
   // a log entry dated in the future (a clock moved back) isn't counted as cleared
   assert.equal(P.combMonth('2026-09-01', log).cleared, 1);
   assert.equal(P.combMonth('bad', log), null);
+});
+
+// ── the ghost race (#11): the best run's pace rides in its jar ──────────
+const paced = (ms, at = 0.5) => finish(Array.from({ length: 19 }, (_, k) => Math.round(ms * at * (k + 1) / 19)), ms);
+
+test('a jar keeps the pace of its best run, and only of its best run', () => {
+  // a fresh jar keeps its run's pace
+  let r = P.addJar(null, run({ ms: 200000, timeline: paced(200000) }));
+  let g = P.ghostOf(r.pantry, 'wildflowers', 0x2a);
+  assert.equal(g.ms, 200000);
+  assert.equal(g.timeline.length, 20);
+  assert.equal(g.timeline[19], 200000);
+  assert.ok(Math.abs(g.timeline[9] - paced(200000)[9]) < 100);
+  assert.ok(!('ghost' in r.jar), 'the jar read back is the shape #09 named');
+  // slower: the time and the pace stay
+  r = P.addJar(r.pantry, run({ ms: 250000, timeline: paced(250000, 0.9) }));
+  assert.deepEqual(P.ghostOf(r.pantry, 'wildflowers', 0x2a), g);
+  // Pure but slower: the seal is earned, but the ghost is still the fastest run
+  r = P.addJar(r.pantry, run({ ms: 260000, pure: true, hints: 0, timeline: paced(260000, 0.2) }));
+  assert.equal(r.jar.pure, true);
+  assert.deepEqual(P.ghostOf(r.pantry, 'wildflowers', 0x2a), g);
+  // faster (and not Pure): a new best time brings its pace
+  r = P.addJar(r.pantry, run({ ms: 150000, timeline: paced(150000, 0.3) }));
+  assert.equal(r.jar.ms, 150000);
+  g = P.ghostOf(r.pantry, 'wildflowers', 0x2a);
+  assert.equal(g.ms, 150000);
+  assert.ok(Math.abs(g.timeline[18] - paced(150000, 0.3)[18]) < 100);
+  // a faster run with no pace to give (resumed from before #11): no stale pace on a new time
+  r = P.addJar(r.pantry, run({ ms: 140000 }));
+  assert.equal(P.ghostOf(r.pantry, 'wildflowers', 0x2a), null);
+  // a pace that doesn't end at the run's time isn't kept
+  r = P.addJar(r.pantry, run({ ms: 130000, timeline: paced(129000) }));
+  assert.equal(P.ghostOf(r.pantry, 'wildflowers', 0x2a), null);
+  // no jar, no ghost; an old jar (no `g`) has none; junk `g` reads as none
+  assert.equal(P.ghostOf(r.pantry, 'clover', 1), null);
+  assert.equal(P.ghostOf(null, 'clover', 1), null);
+  const old = { v: 1, made: 1, hives: { clover: { jars: [{ s: 9, t: 5000, d: 20000, n: 1 }], older: { jars: 0, pure: 0 } } } };
+  assert.equal(P.ghostOf(old, 'clover', 9), null);
+  old.hives.clover.jars[0].g = 'not a pace';
+  assert.equal(P.ghostOf(P.normalize(old), 'clover', 9), null);
+});
+
+test('per hive, only the newest-filled GHOSTS jars keep a pace', () => {
+  let p = null;
+  for (let k = 0; k < P.GHOSTS + 10; k++) p = P.addJar(p, run({ hive: 'clover', seed: k, ms: 90000, timeline: paced(90000) })).pantry;
+  const has = (seed) => !!P.ghostOf(p, 'clover', seed);
+  assert.equal(P.jarsOf(p, 'clover').filter((j) => has(j.seed)).length, P.GHOSTS);
+  assert.equal(has(9), false, 'the earliest-filled gave theirs up');
+  assert.equal(has(10), true);
+  // a replayed old jar that sets a new best gets a pace again; the next-earliest gives one up
+  p = P.addJar(p, run({ hive: 'clover', seed: 0, ms: 80000, timeline: paced(80000) })).pantry;
+  assert.equal(has(0), true);
+  assert.equal(has(10), false);
+  assert.equal(P.jarsOf(p, 'clover').filter((j) => has(j.seed)).length, P.GHOSTS);
 });

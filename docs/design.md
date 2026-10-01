@@ -115,6 +115,13 @@ again until nothing more follows.
    replayed code updates its jar). Its colour is `honey.js`'s
    `honeyColour(hive, seed)`, which also tints the win's pour and pitches the
    jar's clink. Old saves get no jars backfilled.
+   Since #11, a jar also keeps the **pace** of the run that set its best
+   time (`ghost.js`: the elapsed ms at each 5% past the opening, penalties
+   included, stored as 38 base-36 characters relative to the jar's time;
+   the newest-filled 50 jars per hive keep one, so 600 jars stay under
+   50 KB). Replaying the code races that **ghost** on the rail's race bar
+   (`race.js`, which P1 Race will reuse); "Show ghost" on the pause sheet
+   (`prefs.ghost`) hides it, and a daily shows none until cleared once.
 7. **Frame codes** (`AP-0000ABC`): the hive plus the seed in base 36, shown on
    the pause and win sheets (the rail's second line is the clean-read count
    since #03), and typed into the menu. This is racing
