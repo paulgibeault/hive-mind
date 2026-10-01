@@ -20,7 +20,7 @@
 
 import { makeRng } from './arcade-rng.js';
 import { neighbours } from './hex.js';
-import { solve, SAFE, GUARD, QUEEN } from './solver.js';
+import { solve, provenNow as provenFrom, minimalProof as proofFrom, SAFE, GUARD, QUEEN } from './solver.js';
 
 export const HIVES = [
   { id: 'clover',      name: 'Clover Field',  cols: 8, rows: 15, guards: 23, queens: 0,  broken: 0 },
@@ -42,6 +42,9 @@ export const hiveById = (id) => HIVES.find((h) => h.id === current(id)) || HIVES
 export const EMPTY = 0, G = 1, Q = 2;
 // a player's mark on a hidden cell
 export const NONE = 0, MARK_G = 1, MARK_Q = 2;
+
+// the solver's domain bits, for reading provenNow / minimalProof
+export { SAFE, GUARD, QUEEN };
 
 export const MAX_TRIES = 4000;
 // the save format of a game state: 2 since the guards and broken comb
@@ -230,6 +233,45 @@ export function sweep(s, i) {
 /** The one gesture: tap a hidden cell to uncap it, a number to sweep it. */
 export function tap(s, i) {
   return s.open[i] ? sweep(s, i) : reveal(s, i);
+}
+
+// ── what the player can know ─────────────────────────────────────────────
+
+/* The screen as the solver should see it: which cells are uncapped (safe),
+ * and what each shows. Reads s.cells only for uncapped cells, and never
+ * reads marks — marks are the player's word, not knowledge. The cell that
+ * stung is treated as still hidden, so after a sting these queries describe
+ * the board as it was just before the tap ("was it provable?"). */
+function onScreen(s) {
+  const n = s.cols * s.rows;
+  const opened = new Uint8Array(n);
+  for (let i = 0; i < n; i++) if (s.open[i] && s.cells[i] === EMPTY) opened[i] = 1;
+  return {
+    nbrs: nbrsOf(s.cols, s.rows),
+    opened,
+    clueAt: (i) => (opened[i] ? clueOf(s, i) : null),
+    kinds: s.queens > 0 ? SAFE | GUARD | QUEEN : SAFE | GUARD,
+  };
+}
+
+/**
+ * What a careful player can know from the clues on screen now:
+ * { safe: Set<i>, guard: Map<i, GUARD|QUEEN> } over hidden cells (solver.js
+ * bits). Ignores the global guard count, as the generator's solver does.
+ */
+export function provenNow(s) {
+  const v = onScreen(s);
+  return provenFrom(v.nbrs, v.opened, v.clueAt, v.kinds);
+}
+
+/**
+ * The smallest set of uncapped clue cells that alone proves hidden cell i:
+ * { value: SAFE|GUARD|QUEEN, clues: number[] }, or null if i isn't provable
+ * now. Pass provenNow(s) as `known` when asking about many cells of one state.
+ */
+export function minimalProof(s, i, known) {
+  const v = onScreen(s);
+  return proofFrom(v.nbrs, v.opened, v.clueAt, v.kinds, i, known);
 }
 
 /** A human-sized board code for a frame, e.g. "AP-005K2QX". */
