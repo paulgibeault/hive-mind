@@ -25,7 +25,7 @@ import { solve, provenNow as provenFrom, minimalProof as proofFrom, SAFE, GUARD,
 export const HIVES = [
   { id: 'clover',      name: 'Clover Field',  cols: 8, rows: 15, guards: 23, queens: 0,  broken: 0 },
   { id: 'apple',       name: 'Apple Orchard', cols: 9, rows: 18, guards: 18, queens: 13, broken: 0 },
-  { id: 'wildflowers', name: 'Wildflowers',   cols: 9, rows: 18, guards: 31, queens: 0,  broken: 6 },
+  { id: 'wildflowers', name: 'Wildflowers',   cols: 9, rows: 18, guards: 26, queens: 0,  broken: 12 },
 ];
 
 // The hives' ids before 2026-09-28. Saves, records and codes from then still

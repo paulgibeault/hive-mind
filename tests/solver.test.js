@@ -439,11 +439,12 @@ test('minimal proofs: the clues alone prove the cell, and no smaller set does (b
 });
 
 test('generation is unchanged by #2 (fingerprint of seeds 1–300, every hive)', () => {
-  // computed on origin/main before #2 touched solver.js
+  // computed on origin/main before #2 touched solver.js (Wildflowers re-pinned
+  // 2026-09-30 for its new guard and broken counts; the solver didn't change)
   const want = {
     clover: 'c7315847d520a8f27f5245e7d63880c3be8c22ae70a259b8723e2ac886c811e1',
     apple: '03e25b1e04cdf78aa2afe7e7e8f8e4eb09dd637f9de8e50ff13dd6a85115229b',
-    wildflowers: '02c002e902179f9bf64790989bec0743a3a1dc1b8cfc8d8dedc040087cc8d268',
+    wildflowers: '0eed28e057c14470ea69b7a5acfcc449f43d2860122eb5960f52229f80ef783a',   // re-pinned when Wildflowers moved to 26 guards / 12 broken
   };
   for (const h of C.HIVES) {
     const hash = createHash('sha256');

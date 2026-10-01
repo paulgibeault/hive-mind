@@ -33,7 +33,7 @@ mode.
 |---|---|---|---|
 | Clover Field (`clover`) | 8 × 15 | 23 guards | hexes: six neighbours, not eight |
 | Apple Orchard (`apple`) | 9 × 18 | 18 guards + 13 queen's guards | two kinds, each counted separately. A cell reads e.g. amber **2** and a red boxed **1**. You mark the kind, and a sweep only trusts marks of the right kind |
-| Wildflowers (`wildflowers`) | 9 × 18 | 31 guards, 6 broken cells | some comb is **broken**: safe, but it tells you nothing. An uncapped broken cell shows its break and no number, never floods, and can't be swept. Capped, it looks like any other cap |
+| Wildflowers (`wildflowers`) | 9 × 18 | 26 guards, 12 broken cells | some comb is **broken**: safe, but it tells you nothing. An uncapped broken cell shows its break and no number, never floods, and can't be swept. Capped, it looks like any other cap |
 
 Sizes fill a portrait phone: the frame is width-bound at 8–9 cells across,
 which keeps each cell about 40 px, a comfortable tap target. Densities (about
@@ -55,8 +55,8 @@ again until nothing more follows.
   verdict.
 - `generate(hive, seed)` draws candidate frames from one seeded stream and
   keeps the first one the solver can finish. Over seeds 1–1000 the median
-  is 3 tries for Clover Field, 2 for Apple Orchard and 10 for Wildflowers
-  (max 25, 21 and 137 of the 4000 allowed), well under 2 ms a frame. A test
+  is 3 tries for Clover Field, 2 for Apple Orchard and 7 for Wildflowers
+  (max 25, 21 and 88 of the 4000 allowed), well under 2 ms a frame. A test
   holds Wildflowers to that budget. A frame is a pure function of (hive, seed).
 - The solver is deliberately **stronger than a casual player**: it does full
   local enumeration, but ignores the global hazard count. "Solvable" means a
@@ -112,12 +112,12 @@ again until nothing more follows.
    null for it, which the solver already reads as "no clue here", so the
    solver's cracked-clue branch is gone. The "never show a cracked 0" rule
    went with it.
-4. **Six broken cells, not twenty.** A blank tells you less than a crack
+4. **Twelve broken cells at 26 guards, not twenty at 31.** A blank tells you less than a crack
    did, so it costs the generator more. Measured over seeds 1–1000 at 31
    guards: 12 broken → median 60 tries (max 772); 8 → 17; 6 → **10** (max
-   137); 5 → 8. Six is the most that keeps the median at 10. If Wildflowers
-   wants more broken comb, fewer guards buys it: 26 guards with 12 broken
-   runs at median 7 (max 88). A playtest call.
+   137); 5 → 8. Six was the most that kept the median at 10, which made
+   broken comb rare. Fewer guards buys more of it: 26 guards with 12 broken
+   runs at median 7 (max 88), and that is what ships (2026-09-30).
 5. **Saves move to v2.** On boot, and after a save import, `migrate.js`
    (pure, tested) brings v1 data across: the run's hive and field names,
    `time-<id>` records, and the hive keys in `Arcade.stats('frames')` and
