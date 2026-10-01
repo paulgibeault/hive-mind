@@ -1,6 +1,6 @@
-/* reads.js — how a move read: clean or lucky, and whether the frame is still
- * Pure (the frame kind). The module is pure too: no DOM, no clock. main.js
- * asks; core.js stays rules-only.
+/* reads.js — how a move read: clean or lucky, whether the frame is still
+ * Pure, and what a sting should have taught. The module is pure too: no DOM,
+ * no clock. main.js asks; core.js stays rules-only.
  *
  * Everything here is decided from the state BEFORE the tap, with one
  * provenNow(s) computed per tap by main.js and passed in:
@@ -12,10 +12,11 @@
  *   Pure    cleared with 0 lucky moves, 0 hints (#07) and 0 smoke (#08).
  *
  * No tells: nothing here reads a hidden cell's contents before the move has
- * happened.
+ * happened, and lesson() is only asked after a sting, when the frame is
+ * shown anyway.
  */
 
-import { nbrsOf, EMPTY, NONE } from './core.js';
+import { nbrsOf, minimalProof, EMPTY, NONE, QUEEN } from './core.js';
 
 // ── the run's counters ──────────────────────────────────────────────────
 
@@ -67,3 +68,84 @@ export const classify = (move, proven) => (move.targets.every((j) => proven.safe
 
 /** The counters after a move that uncapped and didn't sting. */
 export const tally = (r, verdict) => ({ ...r, [verdict]: r[verdict] + 1 });
+
+// ── the sting lesson (#04) ──────────────────────────────────────────────
+
+/**
+ * What gave it away, for a move that stung. Decided from the state before
+ * the tap: `move` from moveAt() and `proven` from provenNow(), both taken
+ * before Core.tap (the same provenNow #03 reads clean moves with). `s` is
+ * the state after the sting; minimalProof() treats the stung cell as still
+ * hidden, and a stinging reveal changes nothing else, so it answers about
+ * the board as it was.
+ *
+ * Returns { kind, clues, stung, safeHint, text, rings }:
+ *   kind      'proven-guard'  the tapped cell was a proven guard
+ *             'guess'         nothing proved it either way
+ *             'wrong-mark'    a sweep trusted a mark on a safe cell
+ *   clues     the clue cells ringed in honey: the smallest proof, or the
+ *             sweep's source number
+ *   stung     the cell that stung (ringed red)
+ *   safeHint  for a guess, the first cell in provenNow().safe, or -1
+ *   text      the card's sentence, under its "What gave it away" heading
+ *   rings     [{ i, color: 'honey' | 'red' | 'safe' }] for the renderer
+ */
+export function lesson(s, move, proven) {
+  const stung = s.stung;
+  const rings = (clues, extra = []) =>
+    [...clues.map((i) => ({ i, color: 'honey' })), ...extra, { i: stung, color: 'red' }];
+
+  if (move.type === 'sweep') {
+    return {
+      kind: 'wrong-mark', clues: [move.cell], stung, safeHint: -1,
+      text: 'A mark was on a safe cell, so the sweep trusted it.',
+      rings: rings([move.cell]),
+    };
+  }
+
+  const value = proven.guard.get(move.cell);
+  if (value) {
+    const p = minimalProof(s, move.cell, proven);
+    const clues = p ? p.clues : [];
+    return {
+      kind: 'proven-guard', clues, stung, safeHint: -1,
+      text: (clues.length === 1 && sentence(s, clues[0], move.cell, value))
+        || `These numbers proved a ${value === QUEEN ? "queen's guard" : 'guard'} was sleeping there.`,
+      rings: rings(clues),
+    };
+  }
+
+  const first = proven.safe.values().next();
+  const safeHint = first.done ? -1 : first.value;
+  return {
+    kind: 'guess', clues: [], stung, safeHint,
+    text: 'That was a guess, and nothing proved it either way.'
+      + (safeHint < 0 ? '' : ' This cell was safe to open:'),
+    rings: rings([], safeHint < 0 ? [] : [{ i: safeHint, color: 'safe' }]),
+  };
+}
+
+const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six'];
+
+/**
+ * The plain-English proof when one clue alone proves the guard, or null
+ * (the caller then uses the generic line; no general proofs in English).
+ * One clue proves a guard only by being FULL: exactly n capped neighbours
+ * (before the tap, so the stung cell counts) and n hazards, all of one kind.
+ * The spec's other one-clue case, a clue with 0 guards left, proves cells
+ * SAFE, so it never explains a sting.
+ */
+export function sentence(s, c, cell, value) {
+  if (s.broken[c]) return null;
+  const nb = nbrsOf(s.cols, s.rows)[c];
+  const capped = nb.filter((j) => j === cell || !s.open[j]).length;
+  const g = s.shown[c], q = s.queens > 0 ? s.shownH[c] : 0;
+  if (g + q !== capped) return null;
+  if ((value === QUEEN ? g : q) !== 0) return null;   // two kinds: one clue names the kind only if it counts one
+  const n = g + q;
+  const label = s.queens > 0 ? `${value === QUEEN ? 'red' : 'amber'} ${n}` : String(n);
+  const what = value === QUEEN ? "queen's guard" : 'guard';
+  if (n === 1) return `This ${label} had just one capped neighbour, the cell you uncapped.`;
+  return `This ${label} had just ${WORDS[n] || n} capped neighbours, so every one of them hid a ${what}, `
+    + 'the cell you uncapped too.';
+}

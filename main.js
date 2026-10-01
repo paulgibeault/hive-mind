@@ -42,6 +42,7 @@ let input = null;
 let frames = 0;               // frames drawn, for test drivers checking the loop rests
 let tickTimer = null;
 let reads = Reads.fresh();    // this run's { clean, lucky, hints, puffs } (#03)
+let lesson = null;            // what the last sting should have taught (#04)
 
 // ── time ─────────────────────────────────────────────────────────────────
 const elapsed = () => base + (clock ? clock.elapsedMs() : 0);
@@ -145,6 +146,7 @@ function begin(state, opts = {}) {
   markMode = false;
   sfxReset();
   R.reset();
+  unteach();
   fit();
   renderHud();
   show(opts.paused ? 'paused' : 'play');
@@ -248,6 +250,59 @@ function recordWin() {
   $('won-pure').hidden = !pure;
 }
 
+// ── the sting lesson (#04) ──────────────────────────────────────────────
+// Shown only after a sting, from what was known before the tap: the card on
+// the stung sheet, and rings on the frame that stay until the sheet closes.
+function teach(l, now) {
+  lesson = l;
+  $('lesson').hidden = !l;
+  $('lesson-text').textContent = l ? l.text : '';
+  R.view.rings = l ? l.rings : [];
+  R.view.ringsAt = now;
+  placeLesson(now);
+}
+function unteach() {
+  lesson = null;
+  R.view.rings = [];
+  R.view.lift = { from: 0, to: 0, at: -1 };
+  R.view.dy = 0;
+  $('lost').classList.remove('top');
+  stage.classList.remove('lifted');
+}
+
+/* The sheet must not cover the rings. It docks at the bottom, where spare
+ * height collects; if the rings sit under it, the frame slides up (the rail
+ * gets a backdrop so the comb passing beneath it stays quiet). If they span
+ * too much for that, the sheet docks to the top instead. If nothing fits
+ * them all (a guess's safe cell can be far from the sting), the sheet stays
+ * at the bottom and the frame keeps the lesson's own rings in view — the
+ * proof, or the safe cell — ahead of the red one the player just tapped. */
+function placeLesson(now) {
+  const sheet = $('lost');
+  sheet.classList.remove('top');
+  stage.classList.remove('lifted');
+  const rings = R.view.rings;
+  if (!rings.length) { R.lift(0, now); return; }
+  const r = R.layout.r, pad = 8;
+  const span = (list) => {
+    const ys = list.map((g) => R.at(g.i).y - R.view.dy);              // where they sit unlifted
+    return { hi: Math.min(...ys) - r, lo: Math.max(...ys) + r };
+  };
+  const { hi, lo } = span(rings);
+  const railBottom = $('rail').offsetTop + $('rail').offsetHeight + pad;
+  const bottomRoom = sheet.offsetTop - pad;                // offsetTop ignores the rise animation
+  const up = (dy) => { R.lift(Math.min(0, dy), now); stage.classList.toggle('lifted', dy < 0); };
+  if (lo <= bottomRoom) { up(0); return; }
+  if (lo - hi <= bottomRoom - railBottom) { up(bottomRoom - lo); return; }
+  sheet.classList.add('top');
+  const topRoom = sheet.offsetTop + sheet.offsetHeight + pad;
+  if (lo - hi <= R.layout.H - pad - topRoom) { R.lift(Math.max(0, topRoom - hi), now); return; }
+  sheet.classList.remove('top');
+  const key = rings.filter((g) => g.color !== 'red');
+  const k = span(key.length ? key : rings);
+  up(Math.max(bottomRoom - k.lo, railBottom - k.hi));
+}
+
 // ── core events → everything else ────────────────────────────────────────
 // Every cue hears where the frame is ({ hive, seed, progress }), never what is
 // under a cap. `extra` is only ever what this action has just shown.
@@ -264,7 +319,7 @@ function uncapSound(events, rings) {
   else if (n === 1) sfx('uncap', cue(s.broken[ups[0].cells[0]] ? { cells: 1, kind: 'broken' } : { cells: 1 }));
 }
 
-function drain() {
+function drain(pre) {
   const now = performance.now();
   const events = s.events.splice(0);
   let rings = 0;                  // the deepest ripple this action drew
@@ -285,6 +340,7 @@ function drain() {
         $('lost-title').textContent = e.kind === Core.Q ? "Stung by a queen's guard" : 'Stung';
         $('lost-left').textContent = `${Core.safeLeft(s)} safe cells were still capped.`;
         show('lost');
+        teach(pre ? Reads.lesson(s, pre.move, pre.proven) : null, now);   // #04, from the pre-tap read
         break;
       case 'won':
         runClock(false);
@@ -324,7 +380,7 @@ function act(fn, i) {
     for (const e of s.events) if (e.type === 'uncap') e.proven = verdict === 'clean';
   }
   if (sweeping) R.swept(i, performance.now());     // before its uncaps, which follow its light
-  drain();
+  drain(move && { move, proven });      // the same pre-tap read teaches a sting (#04)
   persistRun();
 }
 
@@ -338,6 +394,7 @@ function fit() {
   const r = stage.getBoundingClientRect();
   const hive = s ? s : Core.HIVES[prefs.hive];
   R.resize(Math.max(1, r.width), Math.max(1, r.height), hive.cols, hive.rows, 56);
+  if (mode === 'lost' && s) placeLesson(-1);
   kick();
 }
 
@@ -416,6 +473,7 @@ async function boot() {
       $('continue-title').textContent = run.daily ? `Back to the daily ${hive.name}` : `Back to the ${hive.name} frame`;
     }
     paintHive(); renderBest();
+    unteach();
     s = null;
     show('menu');
   }
@@ -476,7 +534,7 @@ async function boot() {
   // ?dev=1 — a handle for test drivers and the console; never for the game.
   if (new URLSearchParams(location.search).has('dev')) {
     window.__hive = {
-      get s() { return s; }, get mode() { return mode; }, get elapsed() { return elapsed(); }, get reads() { return reads; },
+      get s() { return s; }, get mode() { return mode; }, get elapsed() { return elapsed(); }, get reads() { return reads; }, get lesson() { return lesson; },
       get frames() { return frames; }, get running() { return loop.running(); },
       layout: R.layout, at: R.at, view: R.view, Core, today,
     };
