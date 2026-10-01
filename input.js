@@ -7,15 +7,24 @@
  *
  * A press that drifts more than a finger's width is abandoned: nothing on
  * this board is dragged, so a drift is a mis-touch, not a gesture.
+ *
+ * pressing() tells the renderer how far a press has got toward a long-press,
+ * so it can draw the hold ring; h.onPress() fires whenever that changes
+ * between "a press" and "none", so a resting loop can wake to draw it.
  */
 
-const HOLD_MS = 380;
+export const HOLD_MS = 380;
 const SLOP = 12;
 
 export function bindInput(el, h) {
   let press = null;
 
-  const cancel = () => { if (press) clearTimeout(press.timer); press = null; };
+  const cancel = () => {
+    if (!press) return;
+    clearTimeout(press.timer);
+    press = null;
+    if (h.onPress) h.onPress();
+  };
 
   el.addEventListener('pointerdown', (e) => {
     if (!h.active()) return;
@@ -24,13 +33,15 @@ export function bindInput(el, h) {
     cancel();
     const cell = h.cellAt(e.offsetX, e.offsetY);
     if (cell < 0) return;
-    press = { id: e.pointerId, x: e.clientX, y: e.clientY, cell, held: false };
+    press = { id: e.pointerId, x: e.clientX, y: e.clientY, cell, held: false, since: performance.now() };
     press.timer = setTimeout(() => {
       if (!press) return;
       press.held = true;
+      if (h.onPress) h.onPress();
       h.onMark(press.cell);
       if (navigator.vibrate) { try { navigator.vibrate(12); } catch { /* not allowed */ } }
     }, HOLD_MS);
+    if (h.onPress) h.onPress();
   });
 
   el.addEventListener('pointermove', (e) => {
@@ -63,5 +74,11 @@ export function bindInput(el, h) {
     else if ((e.key === 'm' || e.key === 'M') && h.active()) { h.onToggle(); e.preventDefault(); }
   });
 
-  return { cancel };
+  /** The press under way: { cell, since, t } with t 0..1 over HOLD_MS, or null. */
+  function pressing(now = performance.now()) {
+    if (!press || press.held) return null;
+    return { cell: press.cell, since: press.since, t: Math.min(1, (now - press.since) / HOLD_MS) };
+  }
+
+  return { cancel, pressing };
 }

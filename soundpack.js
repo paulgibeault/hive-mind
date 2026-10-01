@@ -219,7 +219,10 @@
       const p = p0 || {}, r = rnd(p, r0), h = hiveOf(p), lad = ladderOf(h, p);
       const v = FLOOD_V[(p.variant | 0) % 4];
       const fc = S.between(r, 0.85, 1.15);
-      const n = Math.min(6, 2 + Math.floor(Math.log2(Math.max(2, p.cells || 2))));
+      // one droplet per ring of the ripple when the game says how deep it ran,
+      // else a run that grows with the flood's size
+      const n = p.rings > 0 ? Math.min(6, Math.max(2, p.rings | 0))
+        : Math.min(6, 2 + Math.floor(Math.log2(Math.max(2, p.cells || 2))));
       S.strike(ctx, o, t, { dur: 0.004, hp: 3600 * fc, gain: 0.08, seed: seed(r) });
       S.rustle(ctx, o, t, { dur: 0.1, f0: v.band * fc, f1: v.band * 1.7 * fc, Q: 1.0, gain: 0.06, attack: 0.006, seed: seed(r) });
       // from the current rung, an octave under the single uncap so a big

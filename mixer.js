@@ -15,12 +15,14 @@ import { nbrsOf, floods } from './core.js';
 //                the opening uncapped, 1 at the clear (public: the open cells
 //                and the hive's guard totals)
 //   cells        how many cells this action opened (public once it has)
+//   rings        how many rings deep a flood's ripple runs (public once it
+//                has: the cells it opened, drawn ring by ring)
 //   kind         what the action revealed or placed, AFTER it happened: the
 //                guard kind that stung, the pin a mark put in, or 'broken' for
 //                an uncapped broken comb. Never asked of a hidden cell.
 // Extending this list is a design decision (#06 rule 6, "no tells"): a new
 // field must be something the player can already see when the cue fires.
-export const ALLOWED = Object.freeze(['hive', 'seed', 'progress', 'cells', 'kind']);
+export const ALLOWED = Object.freeze(['hive', 'seed', 'progress', 'cells', 'rings', 'kind']);
 
 // Rungs on the climb. Matches the length of each hive's ladder in soundpack.js.
 export const STEPS = 6;
