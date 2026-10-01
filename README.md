@@ -19,7 +19,7 @@ hexagons where every frame is proven solvable without a guess. A game for
 | `render.js` | The frame, drawn on one canvas. Reads state, never writes it. |
 | `input.js` | Taps, long-presses, right-clicks and keys → cell commands. |
 | `main.js` | The sheets, the clock, the daily, and the Arcade SDK contract. |
-| `soundpack.js`, `audio.js` | The sound pack (WebAudio graphs) and its one registration site. |
+| `soundpack.js`, `audio.js`, `mixer.js` | The sound pack (WebAudio graphs, one instrument per hive), its one registration site, and the pure mixer (no-tells param filter, throttle, variant rotation, scale rung). |
 | `tools/stage.mjs`, `sw.js`, `.github/workflows/pages.yml` | The fleet CI/CD standard (launcher `GAME_INTEGRATION.md` §10, §13a). `tools/verify-artifact.mjs` and `tools/inject-precache.mjs` are vendored fleet files — never edit them here. |
 | `docs/design.md` | The concept, the decisions, and the paired modes still to build. |
 

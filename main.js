@@ -10,7 +10,7 @@ import * as Core from './core.js';
 import { migrate, recordKeys } from './migrate.js';
 import { createRenderer } from './render.js';
 import { bindInput } from './input.js';
-import { initAudio, sfx } from './audio.js';
+import { initAudio, sfx, sfxReset, cueContext } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
@@ -113,6 +113,7 @@ function begin(state, opts = {}) {
   clock.reset();
   clock.pause();
   markMode = false;
+  sfxReset();
   R.view.fades.clear();
   R.view.flashAt = -1;
   fit();
@@ -203,18 +204,33 @@ function recordWin() {
 }
 
 // ── core events → everything else ────────────────────────────────────────
+// Every cue hears where the frame is ({ hive, seed, progress }), never what is
+// under a cap. `extra` is only ever what this action has just shown.
+const cue = (extra) => ({ ...cueContext(s), ...extra });
+
+// One action is one sound: a flood or a sweep is a single cue scaled by how
+// many cells it opened, never one uncap per cell. A lone broken comb (shown
+// now that it is open) plays hollow.
+function uncapSound(events) {
+  const ups = events.filter((e) => e.type === 'uncap');
+  const n = ups.reduce((k, e) => k + e.cells.length, 0);
+  if (n > 1) sfx('flood', cue({ cells: n }));
+  else if (n === 1) sfx('uncap', cue(s.broken[ups[0].cells[0]] ? { cells: 1, kind: 'broken' } : { cells: 1 }));
+}
+
 function drain() {
   const now = performance.now();
-  for (const e of s.events.splice(0)) {
+  const events = s.events.splice(0);
+  uncapSound(events);
+  for (const e of events) {
     switch (e.type) {
       case 'uncap':
         R.uncapped(e.cells, now);
-        sfx(e.cells.length > 1 ? 'flood' : 'uncap', { cells: e.cells.length });
         break;
-      case 'mark': sfx(e.mark ? 'mark' : 'unmark', { kind: e.mark }); break;
+      case 'mark': sfx(e.mark ? 'mark' : 'unmark', cue({ kind: e.mark })); break;
       case 'sting':
         R.view.flashAt = now;
-        sfx('sting', { kind: e.kind });
+        sfx('sting', cue({ kind: e.kind }));
         if (navigator.vibrate) { try { navigator.vibrate([40, 40, 80]); } catch { /* not allowed */ } }
         runClock(false);
         dropRun();
@@ -225,7 +241,7 @@ function drain() {
         break;
       case 'won':
         runClock(false);
-        sfx('won');
+        sfx('won', cue());
         recordWin();
         dropRun();
         show('won');
@@ -240,6 +256,14 @@ function drain() {
 function act(fn, i) {
   if (mode !== 'play' || !s) return;
   if (fn(s, i)) { drain(); persistRun(); }
+  else if (fn === Core.tap && sweepRefused(i)) sfx('nope', cue());
+}
+
+// A tap on an uncapped number that has capped, unpinned neighbours but whose
+// pins don't add up: the sweep can't fire. Reads only what the board shows.
+function sweepRefused(i) {
+  if (!s.open[i] || s.broken[i] || !(s.shown[i] + s.shownH[i])) return false;
+  return Core.nbrsOf(s.cols, s.rows)[i].some((j) => !s.open[j] && s.mark[j] === Core.NONE);
 }
 
 function pause() {
