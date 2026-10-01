@@ -13,10 +13,25 @@
  * consistent with the clues touching it; whatever holds in all of them is
  * known. Enumeration is capped by a node budget (not a clock), so the answer
  * is the same on every device.
+ *
+ * Two queries ride on the same machinery, for telling the story of a move
+ * (clean reads, the sting lesson, hints):
+ *   provenNow     what a careful player can know from the clues on screen now
+ *   minimalProof  the fewest revealed clues that alone prove one cell
+ *
+ * Like solve(), neither uses the global hazard count (the HUD's "guards
+ * left"). That keeps one definition of "provable" everywhere: what the
+ * generator promised is exactly what these report, and a proof is always a
+ * handful of local clues a player can point at.
  */
 
 export const SAFE = 1, GUARD = 2, QUEEN = 4;
 const BUDGET = 60000;
+// minimalProof's whole search (subsets tried + enumeration nodes) per call
+export const PROOF_BUDGET = 200000;
+// minimalProof looks for proofs of at most this many clues before falling
+// back to the whole group
+export const PROOF_MAX = 4;
 
 const kindOf = (bit) => (bit === GUARD ? 1 : bit === QUEEN ? 2 : 0);
 const single = (m) => m === SAFE || m === GUARD || m === QUEEN;
@@ -26,31 +41,202 @@ const single = (m) => m === SAFE || m === GUARD || m === QUEEN;
  *   nbrs      neighbour lists
  *   dom       Uint8Array of domains — narrowed IN PLACE
  *   clueAt(i) → the clue a revealed cell shows, or null for none
- *   open(i)   called for each cell proven SAFE; returns the indices that
- *             reveal opens (the cell itself, plus a flood) so their clues
- *             join the reasoning
- * Returns true if every SAFE cell ended up opened.
+ *   open(i)   called for each cell proven SAFE. The generator's open()
+ *             uncaps it (and floods), setting opened[] so new clues join the
+ *             reasoning. An open() that only records — or none at all —
+ *             leaves the cell hidden but decided: the loop then chains
+ *             through domains alone, which is what provenNow wants.
+ *   opened    Uint8Array, 1 for an uncapped cell
+ * Returns true if every SAFE cell ended up opened. Either way dom is left
+ * narrowed as far as the clues go; callers may read it.
  */
-export function solve(nbrs, dom, clueAt, open, opened) {
+export function solve(nbrs, dom, clueAt, open = () => {}, opened) {
   // Learning anything can open cells (a flood) and so reshape every group:
   // after any progress, the groups are drawn again from scratch.
+  //
+  // A group that taught nothing (or ran out of budget) would teach nothing
+  // again from the same position, so it is remembered by everything its
+  // enumeration reads — its clues, in order, and the state of their
+  // neighbours — and skipped until that changes. Same answers, fewer nodes:
+  // it matters most for a group too big for the budget, which would
+  // otherwise be re-enumerated in full after every unrelated step.
+  const barren = new Set();
   let progress = true;
   while (progress) {
     progress = false;
     for (const group of groups(nbrs, dom, clueAt, opened)) {
+      const key = position(group, nbrs, dom, opened);
+      if (barren.has(key)) continue;
       const seen = enumerate(group, nbrs, dom, clueAt, opened);
-      if (!seen) continue;
+      if (!seen) { barren.add(key); continue; }
       const learnt = [];
       for (let k = 0; k < group.cells.length; k++) {
         const i = group.cells[k];
         if (seen[k] !== dom[i]) { dom[i] = seen[k]; learnt.push(i); }
       }
+      if (!learnt.length) barren.add(key);
       for (const i of learnt) if (dom[i] === SAFE && !opened[i]) open(i);
       if (learnt.length) { progress = true; break; }
     }
   }
   for (let i = 0; i < dom.length; i++) if (dom[i] & SAFE && !opened[i]) return false;
   return true;
+}
+
+/**
+ * What a careful player can know right now.
+ *   nbrs       neighbour lists
+ *   opened     1 for an uncapped cell (safe, by definition); 0 for hidden
+ *   clueAt(i)  the clue an uncapped cell shows, or null (broken comb). Only
+ *              called for opened cells.
+ *   kinds      what a hidden cell might be: SAFE|GUARD, or SAFE|GUARD|QUEEN
+ * Returns { safe: Set<i>, guard: Map<i, GUARD|QUEEN> } over hidden cells.
+ *
+ * Chains through decided cells (a known guard feeds its neighbours' clues)
+ * but never opens a cell, so no clue the player hasn't seen enters. It
+ * knows nothing of contents or marks: give it only what is on screen.
+ * Exact on every group whose enumeration fits the node budget; a group that
+ * doesn't is left undecided (never guessed).
+ */
+export function provenNow(nbrs, opened, clueAt, kinds) {
+  const n = nbrs.length;
+  const seen = Uint8Array.from(opened, (o) => (o ? 1 : 0));   // solve() must not touch the caller's
+  const dom = new Uint8Array(n);
+  for (let i = 0; i < n; i++) dom[i] = seen[i] ? SAFE : kinds;
+  solve(nbrs, dom, (i) => (seen[i] ? clueAt(i) : null), undefined, seen);
+  const safe = new Set(), guard = new Map();
+  for (let i = 0; i < n; i++) {
+    if (seen[i] || !single(dom[i])) continue;
+    if (dom[i] === SAFE) safe.add(i); else guard.set(i, dom[i]);
+  }
+  return { safe, guard };
+}
+
+/**
+ * The smallest set of revealed clue cells that alone proves hidden cell i.
+ * Same inputs as provenNow, plus i and, optionally, provenNow's result for
+ * this state (to save recomputing it when asking about many cells).
+ * Returns { value: SAFE|GUARD|QUEEN, clues: number[] (ascending) }, or null
+ * if i isn't provable now.
+ *
+ * "Alone proves" means: with only those clues on screen (every other cell
+ * hidden and unknown), every assignment consistent with them gives i the same
+ * value. A minimal proof is always CONNECTED to i — each clue reaches i
+ * through clues that share hidden neighbours — since a clue in a separate
+ * component constrains nothing i depends on. So subsets are grown outward
+ * from the clues touching i, size 1..PROOF_MAX, in a fixed order (by size,
+ * then lexicographically by cell index); the first that proves i wins. That
+ * covers every proof within 3 rings of i and also chains that reach further
+ * (a 3-clue chain can end 5 rings out). If none of size ≤ PROOF_MAX proves it,
+ * or PROOF_BUDGET runs out, the answer is every clue of i's group: all
+ * revealed clues connected to i, which prove it whenever anything does.
+ */
+export function minimalProof(nbrs, opened, clueAt, kinds, i, known) {
+  if (opened[i]) return null;
+  const now = known || provenNow(nbrs, opened, clueAt, kinds);
+  const value = now.safe.has(i) ? SAFE : now.guard.get(i);
+  if (!value) return null;
+
+  // a usable clue: uncapped, has a clue, and still touches a hidden cell
+  const isClue = (c) => opened[c] && clueAt(c) !== null && nbrs[c].some((j) => !opened[j]);
+  const cluesNear = (h) => nbrs[h].filter(isClue);          // clue cells next to hidden h
+  const adj = new Map();                                     // clue → clues sharing a hidden cell
+  const adjOf = (c) => {
+    if (!adj.has(c)) {
+      const out = new Set();
+      for (const h of nbrs[c]) if (!opened[h]) for (const d of cluesNear(h)) if (d !== c) out.add(d);
+      adj.set(c, [...out].sort((a, b) => a - b));
+    }
+    return adj.get(c);
+  };
+
+  // i's group: every clue connected to i
+  const roots = cluesNear(i).sort((a, b) => a - b);
+  const groupClues = () => {
+    const got = new Set(roots), stack = [...roots];
+    while (stack.length) for (const d of adjOf(stack.pop())) if (!got.has(d)) { got.add(d); stack.push(d); }
+    return { value, clues: [...got].sort((a, b) => a - b) };
+  };
+
+  const budget = { left: PROOF_BUDGET };
+  let level = roots.map((c) => [c]);
+  for (let size = 1; size <= PROOF_MAX && level.length; size++) {
+    for (const set of level) {
+      if (--budget.left < 0) return groupClues();
+      const r = counterexample(nbrs, opened, clueAt, kinds, i, value, set, budget);
+      if (r === null) return groupClues();                   // budget ran out mid-search
+      if (!r) return { value, clues: set };
+    }
+    if (size === PROOF_MAX) break;
+    const next = new Map();
+    for (const set of level) {
+      const have = new Set(set);
+      for (const c of set) {
+        for (const d of adjOf(c)) {
+          if (have.has(d)) continue;
+          const grown = [...set, d].sort((a, b) => a - b);
+          const key = grown.join(',');
+          if (!next.has(key)) {
+            if (--budget.left < 0) return groupClues();
+            next.set(key, grown);
+          }
+        }
+      }
+    }
+    level = [...next.values()].sort(lexical);
+  }
+  return groupClues();
+}
+
+const lexical = (a, b) => {
+  for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return a[k] - b[k];
+  return 0;
+};
+
+/* Is there an assignment of the hidden cells around `clueCells` that fits
+ * every one of those clues and gives i something other than `value`?
+ * true/false, or null if the budget ran out. */
+function counterexample(nbrs, opened, clueAt, kinds, i, value, clueCells, budget) {
+  const order = [i];
+  const at = new Map([[i, 0]]);
+  for (const c of clueCells) for (const j of nbrs[c]) if (!opened[j] && !at.has(j)) { at.set(j, order.length); order.push(j); }
+  const qs = clueCells.map((c) => ({ clue: clueAt(c), slots: nbrs[c].filter((j) => !opened[j]).map((j) => at.get(j)) }));
+  const cluesOf = order.map(() => []);
+  qs.forEach((q, qi) => q.slots.forEach((s) => cluesOf[s].push(qi)));
+  const cw = qs.map(() => 0), ch = qs.map(() => 0), left = qs.map((q) => q.slots.length);
+  const BITS = [SAFE, GUARD, QUEEN].filter((b) => kinds & b);
+  const first = BITS.filter((b) => b !== value);
+  const ok = (qi) => {
+    const q = qs[qi].clue;
+    return cw[qi] <= q.guards && ch[qi] <= q.queens && (q.guards - cw[qi]) + (q.queens - ch[qi]) <= left[qi];
+  };
+  const step = (k) => {
+    if (--budget.left < 0) return null;
+    if (k === order.length) return true;
+    for (const b of k === 0 ? first : BITS) {
+      for (const qi of cluesOf[k]) { left[qi]--; if (b === GUARD) cw[qi]++; else if (b === QUEEN) ch[qi]++; }
+      let good = true;
+      for (const qi of cluesOf[k]) if (!ok(qi)) { good = false; break; }
+      const r = good ? step(k + 1) : false;
+      for (const qi of cluesOf[k]) { left[qi]++; if (b === GUARD) cw[qi]--; else if (b === QUEEN) ch[qi]--; }
+      if (r !== false) return r;                             // found one, or out of budget
+    }
+    return false;
+  };
+  return step(0);
+}
+
+/* Everything enumerate() reads for a group, as a key: its clues in order and,
+ * for each, whether each neighbour is open and what it might be. (The group's
+ * cells are exactly the hidden, undecided ones among those neighbours.) */
+function position(group, nbrs, dom, opened) {
+  let key = '';
+  for (const c of group.clues) {
+    key += c + ':';
+    for (const j of nbrs[c]) key += opened[j] ? 'o' : dom[j];
+    key += ',';
+  }
+  return key;
 }
 
 /* Hidden, undecided cells next to a clue, split into groups that share no

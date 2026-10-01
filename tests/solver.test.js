@@ -3,8 +3,10 @@
  * force on small frames. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { solve, SAFE, GUARD, QUEEN } from '../solver.js';
+import { createHash } from 'node:crypto';
+import { solve, SAFE, GUARD, QUEEN, PROOF_MAX } from '../solver.js';
 import { neighbours } from '../hex.js';
+import { makeRng } from '../arcade-rng.js';
 import * as C from '../core.js';
 
 const BIT = [SAFE, GUARD, QUEEN];
@@ -136,5 +138,319 @@ test('broken comb: clueAt is null there, it adds nothing, and the solver still f
     }
     // cells next to the broken comb only are never decided
     for (const j of nbrs[5]) if (!opened[j] && !nbrs[0].includes(j)) assert.equal(dom[j], 3, `mask ${mask} cell ${j}`);
+  }
+});
+
+// ── provenNow / minimalProof (#2) ───────────────────────────────────────────
+
+const KIND_BIT = { [C.G]: GUARD, [C.Q]: QUEEN };
+
+/* A mid-game state: the opening, then up to 14 more safe cells uncapped (some
+ * provable, some lucky), then marks scattered on hidden cells — right and
+ * wrong — since provenNow must not care. Never won: a safe cell stays. */
+const freshGames = new Map();
+function midGame(hive, seed, rnd) {
+  const key = `${hive}/${seed}`;
+  if (!freshGames.has(key)) freshGames.set(key, C.newGame(hive, seed));
+  const s = structuredClone(freshGames.get(key));
+  const steps = rnd.int(0, 14);
+  for (let k = 0; k < steps; k++) {
+    const hidden = s.cells.flatMap((c, i) => (!s.open[i] && c === C.EMPTY ? [i] : []));
+    if (hidden.length < 2) break;
+    const proven = rnd() < 0.5 ? [...C.provenNow(s).safe] : [];
+    const pool = proven.length ? proven : hidden;
+    C.reveal(s, pool[rnd.int(0, pool.length - 1)]);
+    if (s.phase !== 'play' || C.safeLeft(s) < 2) break;
+  }
+  for (let i = 0; i < s.mark.length; i++) {
+    if (!s.open[i] && rnd() < 0.15) s.mark[i] = rnd.int(1, s.queens ? 2 : 1);
+  }
+  return s;
+}
+
+const sorted = (it) => [...it].sort((a, b) => a - b);
+const asPlain = (p) => ({ safe: sorted(p.safe), guard: sorted(p.guard.keys()).map((i) => [i, p.guard.get(i)]) });
+
+/* The pinned example from the design canvas's PlayProposed artboard: Clover
+ * Field seed 7, one char per cell — a digit is an uncapped cell showing that
+ * number, c a capped safe cell, w a capped guard, m a capped cell carrying the
+ * player's guard mark. Checked against the real frame below: the w/m cells
+ * are exactly generate('clover', 7)'s 23 guards, every digit is the real
+ * reading, every uncapped 0 has all its neighbours uncapped (the flood rule),
+ * and the opening lies inside the uncapped set — a state play can reach. */
+const PLAY_PROPOSED =
+  'cccwwcccwccwwcccwcccwccccccccccwwwcwccwc3cwcccwc1m22wccc11011ccc110001mcw10001cccc11001mccw101ccccm201w1cc100110cm100000';
+
+function playProposed() {
+  const s = C.newGame('clover', 7);
+  [...PLAY_PROPOSED].forEach((ch, i) => {
+    if (/\d/.test(ch)) s.open[i] = 1;
+    if (ch === 'm') s.mark[i] = C.MARK_G;
+  });
+  return s;
+}
+
+test('pinned example (PlayProposed, Clover Field seed 7): 94 safe by [93, 101], 49 a guard by [48]', () => {
+  const s = playProposed();
+  const nb = C.nbrsOf(s.cols, s.rows);
+  // the string is an honest state of the real frame
+  [...PLAY_PROPOSED].forEach((ch, i) => {
+    assert.equal(s.cells[i] !== C.EMPTY, ch === 'w' || ch === 'm', `cell ${i} '${ch}'`);
+    if (/\d/.test(ch)) assert.equal(s.shown[i], +ch, `cell ${i} reads ${s.shown[i]}`);
+    if (ch === '0') for (const j of nb[i]) assert.equal(s.open[j], 1, `0 at ${i} left ${j} capped`);
+  });
+  assert.ok(C.newGame('clover', 7).open.every((o, i) => !o || s.open[i]));
+
+  const p = C.provenNow(s);
+  assert.ok(p.safe.has(94));
+  assert.equal(p.guard.get(49), C.GUARD);
+  assert.deepEqual(C.minimalProof(s, 94), { value: C.SAFE, clues: [93, 101] });
+  assert.deepEqual(C.minimalProof(s, 49), { value: C.GUARD, clues: [48] });
+  // 102, the guard that [93, 101] implies, is proven too, by 101 alone
+  assert.deepEqual(C.minimalProof(s, 102, p), { value: C.GUARD, clues: [101] });
+  assert.equal(C.minimalProof(s, 0, p), null);           // capped, nothing proves it yet
+  assert.equal(C.minimalProof(s, 75, p), null);          // uncapped: nothing to prove
+});
+
+test('provenNow is sound: 2,000 mid-game states across every hive', () => {
+  const rnd = makeRng(2026);
+  let safe = 0, guard = 0, brokenOpen = 0;
+  for (let k = 0; k < 2000; k++) {
+    const hive = C.HIVES[k % 3].id;
+    const s = midGame(hive, 1 + (k % 97), rnd);
+    const p = C.provenNow(s);
+    if (s.broken.some((b, i) => b && s.open[i])) brokenOpen++;
+    for (const i of p.safe) { assert.ok(!s.open[i] && s.cells[i] === C.EMPTY, `${hive}#${k}: ${i} not safe`); safe++; }
+    for (const [i, kind] of p.guard) {
+      assert.ok(!s.open[i], `${hive}#${k}: ${i} is open`);
+      assert.equal(kind, KIND_BIT[s.cells[i]], `${hive}#${k}: ${i} wrong kind`);
+      guard++;
+    }
+  }
+  assert.ok(safe > 2000 && guard > 2000, `vacuous: ${safe} safe, ${guard} guard`);
+  assert.ok(brokenOpen > 100, `only ${brokenOpen} states with broken comb uncapped`);
+});
+
+/* Every assignment of the hidden cells consistent with the visible clues (no
+ * global count, as provenNow): per cell, the OR of the bits it can take. */
+function bruteForce(nbrs, opened, clueAt, kinds) {
+  const n = nbrs.length;
+  const hidden = [...Array(n).keys()].filter((i) => !opened[i]);
+  const bits = BIT.filter((b) => kinds & b);
+  const can = new Uint8Array(n);
+  const val = new Uint8Array(n);
+  const clues = [...Array(n).keys()].filter((i) => opened[i] && clueAt(i));
+  const fits = () => clues.every((c) => {
+    let g = 0, q = 0;
+    for (const j of nbrs[c]) { if (val[j] === GUARD) g++; else if (val[j] === QUEEN) q++; }
+    const want = clueAt(c);
+    return g === want.guards && q === want.queens;
+  });
+  const go = (k) => {
+    if (k === hidden.length) { if (fits()) for (const i of hidden) can[i] |= val[i]; return; }
+    for (const b of bits) { val[hidden[k]] = b; go(k + 1); }
+  };
+  go(0);
+  return can;
+}
+
+test('provenNow equals brute force on small frames (≤ 5×5), broken comb and queens included', () => {
+  const rnd = makeRng(77);
+  let decided = 0, tried = 0;
+  for (let t = 0; t < 400; t++) {
+    const cols = rnd.int(3, 5), rows = rnd.int(3, 5), n = cols * rows;
+    const queens = t % 3 === 1;
+    const nbrs = neighbours(cols, rows);
+    const cells = [...Array(n)].map(() => (rnd() < 0.3 ? (queens && rnd() < 0.5 ? C.Q : C.G) : C.EMPTY));
+    const broken = cells.map((c) => (t % 3 === 2 && c === C.EMPTY && rnd() < 0.2 ? 1 : 0));
+    const f = {
+      cols, rows, queens: queens ? 1 : 0, cells, broken,
+      shown: cells.map((_, i) => nbrs[i].filter((j) => cells[j] !== C.EMPTY && (!queens || cells[j] === C.G)).length),
+      shownH: cells.map((_, i) => (queens ? nbrs[i].filter((j) => cells[j] === C.Q).length : 0)),
+    };
+    // uncap safe cells until few enough stay hidden to enumerate every layout
+    const limit = queens ? 8 : 12;
+    const open = new Array(n).fill(0);
+    const safeCells = cells.flatMap((c, i) => (c === C.EMPTY ? [i] : []));
+    for (const i of safeCells) if (rnd() < 0.6) open[i] = 1;
+    for (const i of safeCells) if (open.filter((o) => !o).length > limit) open[i] = 1;
+    if (open.filter((o) => !o).length > limit) continue;
+    const s = { ...f, open, mark: new Array(n).fill(0) };
+
+    const want = bruteForce(nbrs, Uint8Array.from(open), (i) => C.clueOf(f, i), queens ? 7 : 3);
+    const p = C.provenNow(s);
+    for (let i = 0; i < n; i++) {
+      if (open[i]) continue;
+      const got = p.safe.has(i) ? SAFE : p.guard.get(i) ?? 0;
+      const exact = BIT.includes(want[i]) ? want[i] : 0;
+      assert.equal(got, exact, `t${t} ${cols}×${rows} cell ${i}: brute ${want[i]}`);
+      if (exact) decided++;
+    }
+    tried++;
+  }
+  assert.ok(tried > 300 && decided > 300, `vacuous: ${tried} frames, ${decided} decided`);
+});
+
+/* A copy of s on which every read of a hidden cell's contents — or of any
+ * mark — throws. */
+function blindfold(s) {
+  const watch = (arr, name, ok) => new Proxy(arr, {
+    get(t, k) {
+      if (typeof k === 'string' && /^\d+$/.test(k) && !ok(+k)) throw new Error(`peeked at ${name}[${k}]`);
+      return t[k];
+    },
+  });
+  const isOpen = (i) => s.open[i] === 1;
+  return {
+    ...s,
+    cells: watch(s.cells, 'cells', isOpen),
+    shown: watch(s.shown, 'shown', isOpen),
+    shownH: watch(s.shownH, 'shownH', isOpen),
+    broken: watch(s.broken, 'broken', isOpen),
+    mark: watch(s.mark, 'mark', () => false),
+  };
+}
+
+test('no peeking: hidden contents and marks are never read, and scrambling them changes nothing', () => {
+  const rnd = makeRng(4242);
+  for (let k = 0; k < 150; k++) {
+    const hive = C.HIVES[k % 3].id;
+    const s = midGame(hive, 200 + k, rnd);
+    const p = C.provenNow(s);
+    const plain = asPlain(p);
+    const some = [...p.safe, ...p.guard.keys()].slice(0, 4);
+
+    // 1) a read of a hidden cell (or of any mark) throws
+    const b = blindfold(s);
+    assert.deepEqual(asPlain(C.provenNow(b)), plain);
+    for (const i of some) assert.deepEqual(C.minimalProof(b, i), C.minimalProof(s, i));
+
+    // 2) scramble the hidden cells: move the guards (safe and hazard swap
+    // places through a shuffle), garble their readings and broken comb,
+    // re-mark at random. Uncapped cells and what they show are untouched.
+    const hidden = s.cells.flatMap((_, i) => (s.open[i] ? [] : [i]));
+    const perm = rnd.shuffle([...hidden]);
+    const x = structuredClone(s);
+    hidden.forEach((i, t) => {
+      x.cells[i] = s.cells[perm[t]] === C.EMPTY ? (s.queens ? 1 + (t % 2) : C.G) : C.EMPTY;
+      x.shown[i] = rnd.int(0, 6); x.shownH[i] = rnd.int(0, 6);
+      x.broken[i] = rnd() < 0.3 ? 1 : 0;
+      x.mark[i] = rnd.int(0, s.queens ? 2 : 1);
+    });
+    assert.deepEqual(asPlain(C.provenNow(x)), plain, `${hive}#${k}`);
+    for (const i of some) assert.deepEqual(C.minimalProof(x, i), C.minimalProof(s, i), `${hive}#${k} cell ${i}`);
+  }
+});
+
+test('deterministic: the same state gives the same answer, from a copy too', () => {
+  const rnd = makeRng(9);
+  for (let k = 0; k < 30; k++) {
+    const s = midGame(C.HIVES[k % 3].id, 500 + k, rnd);
+    const a = C.provenNow(s), b = C.provenNow(structuredClone(s));
+    assert.deepEqual(asPlain(a), asPlain(b));
+    for (const i of [...a.safe, ...a.guard.keys()]) {
+      assert.deepEqual(C.minimalProof(s, i), C.minimalProof(structuredClone(s), i));
+    }
+  }
+});
+
+test('after a sting, the stung cell reads as it did just before the tap', () => {
+  const rnd = makeRng(31);
+  let checked = 0;
+  for (let k = 0; k < 60; k++) {
+    const s = midGame(C.HIVES[k % 3].id, 700 + k, rnd);
+    if (s.phase !== 'play') continue;
+    s.mark.fill(C.NONE);
+    const before = C.provenNow(s);
+    const hazard = s.cells.findIndex((c, i) => c !== C.EMPTY && !s.open[i]);
+    const proof = C.minimalProof(s, hazard, before);
+    C.reveal(s, hazard);
+    assert.equal(s.phase, 'lost');
+    assert.deepEqual(asPlain(C.provenNow(s)), asPlain(before));
+    assert.deepEqual(C.minimalProof(s, hazard), proof);
+    checked++;
+  }
+  assert.ok(checked > 30);
+});
+
+/* Do these clues ALONE prove that cell i is `value`? Independent of the
+ * solver: enumerate every assignment of the hidden cells they touch. */
+function provesAlone(s, clueCells, i, value) {
+  const nbrs = C.nbrsOf(s.cols, s.rows);
+  const cells = [...new Set(clueCells.flatMap((c) => nbrs[c].filter((j) => !s.open[j])))];
+  if (!cells.includes(i)) return false;
+  const bits = BIT.filter((b) => (s.queens ? 7 : 3) & b);
+  const val = new Map();
+  const fits = (final) => clueCells.every((c) => {
+    let g = 0, q = 0, u = 0;
+    for (const j of nbrs[c]) {
+      if (s.open[j]) continue;
+      if (!val.has(j)) u++; else if (val.get(j) === GUARD) g++; else if (val.get(j) === QUEEN) q++;
+    }
+    const w = C.clueOf(s, c);
+    return final ? g === w.guards && q === w.queens : g <= w.guards && q <= w.queens && w.guards - g + w.queens - q <= u;
+  });
+  let other = false;
+  const go = (k) => {
+    if (other) return;
+    if (k === cells.length) { if (fits(true) && val.get(i) !== value) other = true; return; }
+    for (const b of bits) { val.set(cells[k], b); if (fits(false)) go(k + 1); val.delete(cells[k]); }
+  };
+  go(0);
+  return !other;
+}
+
+function* subsets(list, size, from = 0, acc = []) {
+  if (acc.length === size) { yield acc; return; }
+  for (let k = from; k < list.length; k++) yield* subsets(list, size, k + 1, [...acc, list[k]]);
+}
+
+test('minimal proofs: the clues alone prove the cell, and no smaller set does (brute force, sizes ≤ 3)', () => {
+  const rnd = makeRng(1234);
+  const sizes = new Map();
+  let small = 0;
+  for (let k = 0; k < 90; k++) {
+    const s = midGame(C.HIVES[k % 3].id, 300 + k, rnd);
+    const nbrs = C.nbrsOf(s.cols, s.rows);
+    const p = C.provenNow(s);
+    const clueCells = s.open.flatMap((o, c) => (o && C.clueOf(s, c) ? [c] : []));
+    for (const i of [...p.safe, ...p.guard.keys()]) {
+      const r = C.minimalProof(s, i, p);
+      assert.equal(r.value, s.cells[i] === C.EMPTY ? SAFE : KIND_BIT[s.cells[i]]);
+      assert.deepEqual(r.clues, sorted(r.clues));
+      assert.ok(provesAlone(s, r.clues, i, r.value), `#${k} cell ${i}: [${r.clues}] does not prove it`);
+      sizes.set(r.clues.length, (sizes.get(r.clues.length) || 0) + 1);
+      if (r.clues.length > 3) continue;
+      // no smaller subset of ALL uncapped clues proves it. (The one pruning:
+      // a proof needs a clue touching i, else i is unconstrained.)
+      for (let size = 1; size < r.clues.length; size++) {
+        for (const sub of subsets(clueCells, size)) {
+          if (!sub.some((c) => nbrs[c].includes(i))) continue;
+          assert.ok(!provesAlone(s, sub, i, r.value), `#${k} cell ${i}: [${sub}] beats [${r.clues}]`);
+        }
+      }
+      small++;
+    }
+  }
+  const bySize = JSON.stringify([...sizes].sort((a, b) => a[0] - b[0]));
+  assert.ok(small > 1000 && sizes.get(2) > 100 && sizes.get(3) > 20, `vacuous: ${bySize}`);
+  // beyond PROOF_MAX, a proof is a whole group (the fallback), never a 5-subset search
+  assert.ok([...sizes.keys()].some((n) => n <= PROOF_MAX));
+});
+
+test('generation is unchanged by #2 (fingerprint of seeds 1–300, every hive)', () => {
+  // computed on origin/main before #2 touched solver.js
+  const want = {
+    clover: 'c7315847d520a8f27f5245e7d63880c3be8c22ae70a259b8723e2ac886c811e1',
+    apple: '03e25b1e04cdf78aa2afe7e7e8f8e4eb09dd637f9de8e50ff13dd6a85115229b',
+    wildflowers: '02c002e902179f9bf64790989bec0743a3a1dc1b8cfc8d8dedc040087cc8d268',
+  };
+  for (const h of C.HIVES) {
+    const hash = createHash('sha256');
+    for (let seed = 1; seed <= 300; seed++) {
+      const f = C.generate(h.id, seed);
+      hash.update(JSON.stringify([f.start, f.tries, f.cells, f.shown, f.shownH, f.broken]));
+    }
+    assert.equal(hash.digest('hex'), want[h.id], h.id);
   }
 });
