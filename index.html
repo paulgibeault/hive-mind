@@ -32,6 +32,9 @@
       <button class="tool" id="tool" type="button" aria-pressed="false" aria-label="Tap marks instead of uncapping">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 21V4l11 5-11 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
+      <button class="tool" id="hint-btn" type="button" aria-label="Bee-line hint" aria-expanded="false" aria-controls="hint">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 19.5c2.5 0 3.5-5 7-5s3.6 3.2 6.4 1.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="0.01 3.4"/><ellipse cx="16.6" cy="5.6" rx="2.3" ry="1.5" transform="rotate(-25 16.6 5.6)" fill="currentColor" opacity=".55"/><ellipse cx="20.6" cy="6.2" rx="2.1" ry="1.4" transform="rotate(30 20.6 6.2)" fill="currentColor" opacity=".55"/><circle cx="18.6" cy="10.2" r="3.1" fill="currentColor"/></svg>
+      </button>
       <button class="tool" id="pause" type="button" aria-label="Pause">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
       </button>
@@ -103,10 +106,24 @@
       </div>
       <p class="result mono"><span id="won-time"></span><span class="result-best" id="won-best"></span></p>
       <p class="mono reads-line" id="won-reads"></p>
+      <p class="mono reads-line won-help" id="won-help" hidden></p>
       <p class="mono code-line">Frame <b id="won-code"></b></p>
       <div class="row">
         <button class="primary" id="again" type="button">New frame</button>
         <button class="ghost" id="won-menu" type="button">Menu</button>
+      </div>
+    </section>
+
+    <!-- the bee-line hint (#07): docked over a live frame, which stays tappable -->
+    <section class="sheet dock hint" id="hint" hidden aria-labelledby="hint-step">
+      <div class="hint-head">
+        <span class="mono eyebrow" id="hint-step">Bee-line · look here</span>
+        <span class="mono hint-cost">+10 s · no Pure seal</span>
+      </div>
+      <p class="hint-text" id="hint-text" aria-live="polite"></p>
+      <div class="row" id="hint-row">
+        <button class="primary" id="hint-why" type="button">Why?</button>
+        <button class="ghost" id="hint-done" type="button">Got it</button>
       </div>
     </section>
 

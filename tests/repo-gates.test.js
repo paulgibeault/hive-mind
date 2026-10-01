@@ -37,7 +37,7 @@ test('the rules import under node with no Arcade global and no DOM in sight', as
   assert.equal(typeof globalThis.Arcade, 'undefined');
   assert.equal(typeof globalThis.document, 'undefined');
   // (mixer.js too: the sound decisions are replayable, so they take `now` as an argument)
-  for (const f of ['core.js', 'solver.js', 'hex.js', 'migrate.js', 'mixer.js', 'juice.js', 'reads.js']) {
+  for (const f of ['core.js', 'solver.js', 'hex.js', 'migrate.js', 'mixer.js', 'juice.js', 'reads.js', 'hint.js']) {
     await assert.doesNotReject(() => import(`../${f}`));
     // code only: the header comment names the very things it forbids
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8')

@@ -280,6 +280,105 @@ await H(() => { window.__hive.view.motion = true; });
 await page.click('#retry');
 await waitMode('play');
 
+// ── the bee-line hint (#07) ──
+// The pinned example again: the canvas state, resumed. A tap on the open 0
+// under the two 1s changes nothing but says where the player is looking.
+await page.click('#pause'); await page.click('#quit');   // so the reload doesn't save over it
+await H(() => {
+  const PLAY_PROPOSED = 'cccwwcccwccwwcccwcccwccccccccccwwwcwccwc3cwcccwc1m22wccc11011ccc110001mcw10001cccc11001mccw101ccccm201w1cc100110cm100000';
+  const s = window.__hive.Core.newGame('clover', 7);
+  [...PLAY_PROPOSED].forEach((ch, i) => { if (/\d/.test(ch)) s.open[i] = 1; if (ch === 'm') s.mark[i] = 1; });
+  Arcade.state.set('run', { s, ms: 83000, daily: null, reads: { clean: 14, lucky: 0, hints: 0, puffs: 0 } });
+});
+await page.reload();
+await page.waitForFunction(() => window.__hive);
+await page.click('#continue');
+await page.click('#resume');
+await waitMode('play');
+assert.equal(await H(() => window.__hive.view.motion), true, 'motion is back on after the reload');
+const hintsBefore = await H(() => (Arcade.stats.get('hints') || {}).clover || 0);
+const moves0 = await H(() => window.__hive.s.moves);
+await tapCell(100);
+assert.deepEqual(await H(() => [window.__hive.s.moves, window.__hive.lastTap]), [moves0, 100]);
+// step 1, from the H key: look here — the clues ringed, no target yet, and
+// the cost paid and said up front
+const t1 = await H(() => window.__hive.elapsed);
+await page.keyboard.press('h');
+assert.equal(await H(() => window.__hive.hint.step), 'look');
+assert.deepEqual(await H(() => window.__hive.view.rings), [{ i: 93, color: 'honey' }, { i: 101, color: 'honey' }]);
+assert.deepEqual(await H(() => window.__hive.view.ghosts), []);
+assert.equal(await page.isVisible('#hint'), true);
+assert.equal(await page.textContent('#hint-text'), 'Look at these numbers together.');
+assert.equal(await page.textContent('#hint .hint-cost'), '+10 s · no Pure seal');
+assert.equal(await page.getAttribute('#hint-btn', 'aria-label'), 'Bee-line hint');
+assert.equal(await page.getAttribute('#hint-btn', 'aria-expanded'), 'true');
+assert.ok((await H(() => window.__hive.elapsed)) - t1 >= 10000, 'the clock jumped 10 s');
+assert.equal(await railReads(), '14 clean · assisted');
+assert.equal(await H(() => window.__hive.reads.hints), 1);
+assert.equal(await H(() => (Arcade.stats.get('hints') || {}).clover), hintsBefore + 1, 'Arcade.stats counts hints per hive');
+// saved with the cost paid, never with the hint open
+assert.deepEqual(await H(() => { const r = Arcade.state.get('run'); return [Object.keys(r).sort(), r.reads.hints, r.ms >= 93000]; }),
+  [['daily', 'lesson', 'ms', 'reads', 's'], 1, true]);
+await page.waitForTimeout(500);
+assert.ok(await H(() => {
+  const h = window.__hive, r = h.layout.r * 0.9, sheet = document.getElementById('hint'), rail = document.getElementById('rail');
+  const top = sheet.classList.contains('top') ? sheet.offsetTop + sheet.offsetHeight : rail.offsetTop + rail.offsetHeight;
+  const bottom = sheet.classList.contains('top') ? innerHeight : sheet.offsetTop;
+  return h.view.rings.every((g) => h.at(g.i).y - r >= top - 1 && h.at(g.i).y + r <= bottom + 1);
+}), 'the hint card does not cover its rings');
+await shot('13-hint-look');
+// step 2, from the button: why — 94 lit, the implied guard at 102 dashed
+await page.click('#hint-why');
+assert.equal(await H(() => window.__hive.hint.step), 'why');
+assert.deepEqual(await H(() => window.__hive.view.rings),
+  [{ i: 93, color: 'honey' }, { i: 101, color: 'honey' }, { i: 94, color: 'lit' }]);
+assert.deepEqual(await H(() => window.__hive.view.ghosts), [{ i: 102, kind: 1 }]);
+assert.equal(await page.textContent('#hint-text'),
+  "The lower 1 has one capped neighbour, so that's its guard (dashed). The same guard fills the upper 1, so the lit cell is safe.");
+assert.equal(await page.isVisible('#hint-why'), false);
+await page.waitForTimeout(400);
+await shot('14-hint-why');
+// Esc closes the hint before it pauses; a second Esc pauses
+await page.keyboard.press('Escape');
+assert.deepEqual(await H(() => [window.__hive.mode, window.__hive.hint, window.__hive.view.rings.length]), ['play', null, 0]);
+assert.equal(await page.isVisible('#hint'), false);
+await page.keyboard.press('Escape');
+assert.equal(await mode(), 'paused');
+await page.click('#resume');
+// H goes off → look → why → off
+await page.keyboard.press('h'); await page.keyboard.press('h');
+assert.equal(await H(() => window.__hive.hint.step), 'why');
+await page.keyboard.press('h');
+assert.equal(await H(() => window.__hive.hint), null);
+// a reload mid-hint clears it (the cost stays paid)
+await page.keyboard.press('h');
+assert.equal(await H(() => window.__hive.reads.hints), 3);
+await page.reload();
+await page.waitForFunction(() => window.__hive);
+await page.click('#continue');
+await page.click('#resume');
+await waitMode('play');
+assert.deepEqual(await H(() => [window.__hive.hint, window.__hive.view.rings.length, window.__hive.reads.hints]), [null, 0, 3]);
+// any tap on the frame closes the hint, and still lands
+await page.keyboard.press('h');
+const lit = await H(() => window.__hive.hint.pick.target);
+await tapCell(lit);
+assert.deepEqual(await H((i) => [window.__hive.hint, window.__hive.s.open[i], window.__hive.view.dy], lit), [null, 1, 0]);
+// "Got it" closes it too
+await page.click('#hint-btn');
+await page.click('#hint-done');
+assert.equal(await H(() => window.__hive.hint), null);
+// the won sheet says what the hints cost, and there's no seal
+await solverClear();
+assert.equal(await page.isVisible('#won-pure'), false);
+assert.match(await page.textContent('#won-reads'), / · 5 hints · /);
+assert.equal(await page.textContent('#won-help'), '5 bee-line hints · +50 s · no Pure seal');
+assert.ok((await H(() => window.__hive.elapsed)) >= 83000 + 50000, 'the clock carries the penalty');
+await page.waitForTimeout(400);
+await shot('15-won-hints');
+await page.click('#again');
+await waitMode('play');
+
 // Wildflowers: broken comb shows up once uncapped
 await page.click('#pause'); await page.click('#quit');
 await page.click('#hive button:nth-child(3)');

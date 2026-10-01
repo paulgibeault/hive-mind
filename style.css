@@ -83,6 +83,16 @@ button, input { font: inherit; color: inherit; }
 }
 .tool svg { width: 20px; height: 20px; }
 .tool[aria-pressed="true"] { background: var(--honey); color: #2a1d10; border-color: var(--honey); }
+/* three tools since the bee-line hint (#07): a phone-width rail packs a
+   little tighter, and the reads line gives way (ellipsis) before it overlaps */
+.rail-id { flex: 0 1 auto; overflow: hidden; }
+.reads { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 420px) {
+  .rail { gap: 6px; padding: 0 8px; }
+  .rail .tool { width: 34px; }
+  .clock { min-width: 0; }
+  .rail-count { gap: 8px; font-size: 16px; }
+}
 
 /* ── sheets ─────────────────────────────────────────────────────────── */
 .sheet {
@@ -216,6 +226,15 @@ h2 { font-size: 30px; }
   background: rgba(59, 43, 25, 0.75);
 }
 .lesson p { margin: 4px 0 0; font-size: 16px; line-height: 1.4; }
+/* the bee-line hint (#07): the frame above it stays live, so only the card
+   itself takes taps; the gradient over the comb lets them through */
+.sheet.dock.hint { pointer-events: none; gap: 8px; }
+.sheet.dock.hint > * { pointer-events: auto; }
+.hint-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.hint-cost { font-size: 12px; color: var(--ink-dim); white-space: nowrap; }
+.hint-text { margin: 0; font-size: 17px; line-height: 1.4; }
+.hint .row.one { grid-template-columns: 1fr; }
+.won-help { color: var(--honey); }
 /* the stung sheet docks to the top when the lesson's rings sit low and tall */
 .sheet.dock.top {
   inset: 0 0 auto 0;
@@ -225,6 +244,9 @@ h2 { font-size: 30px; }
   background: linear-gradient(to bottom, rgba(23, 17, 10, 0.97) 75%, rgba(23, 17, 10, 0));
   animation-name: drop;
 }
+/* docked to the top, the hint card sits under the rail: the clock and the
+   hint button stay in reach */
+.sheet.dock.hint.top { padding-top: calc(var(--rail-h) + 4px + env(safe-area-inset-top)); }
 @keyframes drop { from { transform: translateY(-24px); opacity: 0; } }
 /* the frame slid up under the rail: give the rail a backdrop */
 .lifted .rail { background: linear-gradient(to bottom, rgba(23, 17, 10, 0.97) 80%, rgba(23, 17, 10, 0)); }
