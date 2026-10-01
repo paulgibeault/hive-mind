@@ -14,6 +14,7 @@ hexagons where every frame is proven solvable without a guess. A game for
 | `core.js` | The rules: hives, the frame generator, uncap / mark / sweep, frame codes. Seeded; no DOM, no clock. |
 | `solver.js` | What a careful player can know. The generator keeps only frames it can finish. |
 | `hex.js` | The comb's geometry: neighbours, centres, hit-testing. |
+| `reads.js` | Clean reads: was a move proven before the tap, and is the frame still Pure. Pure; `main.js` asks it. |
 | `migrate.js` | Stored data from older versions (old hive ids, v1 saves) brought up to date. Pure; `main.js` applies it on boot. |
 | `arcade-rng.js` | The fleet's seeded RNG — a vendored, byte-identical copy of the launcher's. Never edit it here. |
 | `render.js` | The frame, drawn on one canvas. Reads state, never writes it. |

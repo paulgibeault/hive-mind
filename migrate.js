@@ -11,6 +11,13 @@
  *   frames   Arcade.stats('frames') keys, old id → new id
  *   daily    Arcade.stats('daily') entries' hive
  * Where an old and a new entry both exist, the better one is kept.
+ *
+ * Clean reads (#03) added fields, not a format: a run's `reads` counters, a
+ * frames entry's `pure` count, a daily entry's `pure` flag and the
+ * pure-time-<id> records. Nothing older has them and nothing here invents
+ * them: a run without `reads` is main.js's Reads.restore() to judge, and a
+ * missing `pure` reads as not Pure. The frames merge below keeps whatever
+ * counts an entry carries.
  */
 
 import { HIVES, OLD_IDS, SAVE_V, G, Q, nbrsOf, solvable } from './core.js';
@@ -89,10 +96,11 @@ export function migrate({ run = null, records = {}, frames = {}, daily = {} } = 
     for (const [old, id] of Object.entries(OLD_IDS)) {
       if (!Object.hasOwn(next, old)) continue;
       const a = next[old] || {}, b = next[id] || {};
-      next[id] = {
-        played: Math.max(a.played || 0, b.played || 0),
-        won: Math.max(a.won || 0, b.won || 0),
-      };
+      const merged = { ...a, ...b };
+      for (const k of ['played', 'won', 'pure']) {
+        if (k in a || k in b) merged[k] = Math.max(a[k] || 0, b[k] || 0);
+      }
+      next[id] = merged;
       delete next[old];
     }
     out.frames = next;

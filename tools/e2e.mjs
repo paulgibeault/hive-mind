@@ -44,6 +44,17 @@ async function clearFrame() {
   }
   await waitMode('won');
 }
+/* Play like the solver: only ever uncap a cell the clues on screen prove. */
+const provenSafe = () => H(() => { const h = window.__hive; return [...h.Core.provenNow(h.s).safe]; });
+async function solverClear() {
+  while ((await mode()) === 'play') {
+    const [i] = await provenSafe();
+    assert.ok(i !== undefined, 'something is always provable');
+    await tapCell(i);
+  }
+  await waitMode('won');
+}
+const railReads = () => page.textContent('#hud-reads');
 
 await page.goto(url);
 await page.waitForFunction(() => window.__hive);
@@ -79,7 +90,7 @@ await page.fill('#code-in', 'or-0000abc');
 await page.press('#code-in', 'Enter');
 await waitMode('play');
 assert.deepEqual(await H(() => [window.__hive.s.hive, window.__hive.s.seed]), ['apple', parseInt('abc', 36)]);
-assert.equal(await page.textContent('#hud-code'), 'AP-0000ABC');
+assert.equal(await page.textContent('#paused-code'), 'AP-0000ABC');   // the code lives on the pause sheet
 await page.waitForTimeout(300);
 await shot('2-apple');
 
@@ -113,13 +124,18 @@ await page.waitForTimeout(700);
 assert.ok(Math.abs((await H(() => window.__hive.elapsed)) - t0) < 5, 'the clock is stopped while paused');
 await page.click('#resume');
 
-// a run survives a reload, and comes back paused
+// a run survives a reload, and comes back paused, its clean reads intact
+const readsBefore = await H(() => window.__hive.reads);
+const railBefore = await railReads();
+assert.equal(readsBefore.clean + readsBefore.lucky, 1, 'the uncap was read as clean or lucky');
 await page.reload();
 await page.waitForFunction(() => window.__hive);
 assert.equal(await page.isVisible('#continue'), true);
 await page.click('#continue');
 assert.equal(await mode(), 'paused');
 assert.equal(await H((i) => window.__hive.s.open[i], target), 1);
+assert.deepEqual(await H(() => window.__hive.reads), readsBefore, 'the counters came back with the run');
+assert.equal(await railReads(), railBefore);
 await page.click('#resume');
 
 // clear it: tap every safe cell (skipping ones a flood already opened)
@@ -327,7 +343,50 @@ assert.deepEqual(await H(() => [window.__hive.s.hive, window.__hive.s.seed]), [t
 await clearFrame();
 await page.click('#won-menu');
 assert.match(await page.textContent('#daily-title'), /cleared$/);
+assert.equal(typeof (await H((d) => Arcade.stats.get('daily')[d].pure, t.date)), 'boolean', 'the daily log says whether it was Pure');
 await shot('7-menu-after-daily');
+
+// clean reads (#03): a solver-driven clear is Pure — its own record and count
+await page.click('#hive button:nth-child(1)');
+const pureBefore = await H(() => (Arcade.stats.get('frames').clover || {}).pure || 0);
+await page.click('#play');
+await waitMode('play');
+assert.equal(await railReads(), '0 clean · pure');
+for (let k = 0; k < 6; k++) await tapCell((await provenSafe())[0]);
+assert.equal(await railReads(), '6 clean · pure');
+await page.waitForTimeout(300);
+await shot('9-rail-pure');
+await solverClear();
+const pureReads = await H(() => window.__hive.reads);
+assert.equal(pureReads.lucky, 0);
+assert.equal(await page.isVisible('#won-pure'), true, 'the Pure seal');
+assert.equal(await page.textContent('#won-reads'), `${pureReads.clean} of ${pureReads.clean} clean · 0 hints · 0 puffs`);
+const pureRec = await H(() => Arcade.records.get('pure-time-clover'));
+assert.ok(pureRec && pureRec.value > 0 && pureRec.direction === 'lower' && pureRec.format === 'duration-ms');
+assert.equal(await H(() => Arcade.stats.get('frames').clover.pure), pureBefore + 1);
+await page.waitForTimeout(400);
+await shot('10-won-pure');
+
+// ...and one forced random uncap on the way costs the seal, quietly
+await page.click('#again');
+await waitMode('play');
+const lucky = await H(() => {
+  const h = window.__hive, s = h.s, p = h.Core.provenNow(s);
+  return s.cells.findIndex((c, i) => c === 0 && !s.open[i] && !p.safe.has(i));
+});
+await tapCell(lucky);
+assert.equal(await mode(), 'play');
+assert.match(await railReads(), /^\d+ clean · assisted$/);
+await page.waitForTimeout(300);
+await shot('11-rail-assisted');
+await solverClear();
+assert.equal((await H(() => window.__hive.reads)).lucky, 1);
+assert.equal(await page.isVisible('#won-pure'), false, 'no seal');
+assert.match(await page.textContent('#won-reads'), /^\d+ of \d+ clean · 0 hints · 0 puffs$/);
+assert.equal(await H(() => Arcade.stats.get('frames').clover.pure), pureBefore + 1, 'not counted as Pure');
+await page.waitForTimeout(400);
+await shot('12-won-assisted');
+await page.click('#won-menu');
 
 // landscape
 await page.click('#play');
