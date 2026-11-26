@@ -10,9 +10,14 @@
  *            open as it passes. A sweep that can't fire shakes its number
  *   mark     the pin drops in large and settles with one bounce
  *   hold     a bubble floats up out of the pressed cell, clear of the finger,
- *            with the mark it will set swelling inside and its rim filling;
- *            when the press becomes a long-press it pops and the pin drops
- *            from it into the cell. Let go before it pops and it's a tap
+ *            with the first choice swelling inside and its rim filling; as a
+ *            long-press it turns slowly through the cell's marks, and on
+ *            release it pops and the pin showing drops into the cell. Let
+ *            go before it's full and it's a tap
+ *   swipe    the marks a sideways swipe sets sit either side of the cell,
+ *            chevrons flowing out to them (faintly, under a hold, too); the
+ *            mark rides the finger, the side it heads for swells and arms,
+ *            and the pin drops from it into the cell
  *   sting    the guard's wings flicker and the frame shakes, under the flash
  *   won      the guards seal under dark wax, and honey pours down the comb
  *   smoke    the smoker calms a sting: grey haze swells and drifts off the
@@ -36,7 +41,8 @@
  */
 
 import { centre, extent, cellAt as hexAt } from './hex.js';
-import { EMPTY, Q, NONE, MARK_G, MARK_Q, nbrsOf, isScout } from './core.js';
+import { EMPTY, Q, NONE, MARK_G, MARK_Q, nbrsOf, isScout, holdChoices, swipeMark } from './core.js';
+import { CYCLE_MS, SWIPE_PX } from './input.js';
 import {
   RING_MS, SWEEP_MS, POUR_ROW_MS, rings, clockwise, showsNumber, finished,
   clamp01, easeOut, easeIn, pinScale, shake,
@@ -630,14 +636,32 @@ export function createRenderer(canvas) {
     return { x: x + (x < layout.W / 2 ? 1 : -1) * r * 2.1, y: y - r * 0.5 };
   }
 
+  /* A choice's glyph: the mark it sets, or — for "clear" — the mark that's
+   * there (a guard, if none), faint and struck through. */
+  function choiceGlyph(x, y, size, m, cur) {
+    if (m) { markGlyph(x, y, size, m); return; }
+    const a = ctx.globalAlpha;
+    ctx.globalAlpha = a * 0.45;
+    markGlyph(x, y, size, cur || MARK_G);
+    ctx.globalAlpha = a;
+    const w = size * 0.33;
+    ctx.strokeStyle = C.dark;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(1.5, size * 0.06);
+    ctx.beginPath(); ctx.moveTo(x - w, y + w); ctx.lineTo(x + w, y - w); ctx.stroke();
+  }
+
   /* The hold bubble: a pale bubble rises out of the pressed cell like a
-   * thought, trailing two dots back to it, with the mark the hold will set
-   * swelling inside (or the current one, struck through, if it will clear).
-   * Its rim fills over HOLD_MS; near the end it buzzes. t 0..1. */
-  function bubble(s, i, t, alpha, now) {
+   * thought, trailing two dots back to it, with the first choice swelling
+   * inside as its rim fills over HOLD_MS; near the end it buzzes. Once it's
+   * a long-press the bubble turns, slowly, through the cell's choices — each
+   * slides in as the last slides out, the rim runs down until the next, and
+   * a row of dots says which of them is up. Letting go places that one. */
+  function bubble(s, i, hold, alpha, now) {
     const r = layout.r, from = at(i), to = bubbleSpot(i);
+    const holding = hold.kind === 'hold', t = hold.t;
     const rise = easeOut(clamp01(t / 0.35));
-    const buzz = t > 0.6 && view.motion ? Math.sin(now / 16) * r * 0.05 * (t - 0.6) / 0.4 : 0;
+    const buzz = !holding && t > 0.6 && view.motion ? Math.sin(now / 16) * r * 0.05 * (t - 0.6) / 0.4 : 0;
     const bx = from.x + (to.x - from.x) * rise + buzz, by = from.y + (to.y - from.y) * rise;
     const R = r * 0.72 * (0.45 + 0.55 * rise);
     view.held = { cell: i, at: now, x: to.x, y: to.y };
@@ -658,25 +682,103 @@ export function createRenderer(canvas) {
     ctx.restore();
     ctx.save();
     ctx.globalAlpha = alpha;
-    // the rim: a faint track, filling clockwise from the top
+    // the rim: a faint track; it fills toward the long-press, then runs
+    // down to the next choice
     ctx.lineCap = 'round';
     ctx.lineWidth = Math.max(2, r * 0.12);
     ctx.strokeStyle = 'rgba(42,29,16,0.18)';
     ctx.beginPath(); ctx.arc(bx, by, R, 0, Math.PI * 2); ctx.stroke();
+    const choices = holdChoices(s, i), n = choices.length, cur = s.mark[i];
+    const size = r * (0.9 + 0.6 * easeOut(t)) * (R / (r * 0.72));
+    if (!holding) {
+      ctx.strokeStyle = C.capDeep;
+      ctx.beginPath(); ctx.arc(bx, by, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * t); ctx.stroke();
+      choiceGlyph(bx, by, size, choices[0], cur);
+      ctx.restore();
+      return;
+    }
+    const step = Math.floor(hold.held / CYCLE_MS), u = (hold.held % CYCLE_MS) / CYCLE_MS;
     ctx.strokeStyle = C.capDeep;
-    ctx.beginPath(); ctx.arc(bx, by, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * t); ctx.stroke();
-    // what the hold will do
-    const m = s.mark[i], top = s.queens > 0 ? MARK_Q : MARK_G;
-    const next = m >= top ? NONE : m + 1;
-    const k = 0.9 + 0.6 * easeOut(t);
-    if (next) markGlyph(bx, by, r * k * (R / (r * 0.72)), next);
-    else {
-      ctx.globalAlpha = alpha * 0.45;
-      markGlyph(bx, by, r * k * (R / (r * 0.72)), m);
+    ctx.beginPath(); ctx.arc(bx, by, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - u)); ctx.stroke();
+    // the choices turn like a wheel: the last slides out left, the next in from the right
+    const slide = view.motion && step > 0 ? easeOut(clamp01(u / 0.25)) : 1;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(bx, by, R * 0.94, 0, Math.PI * 2); ctx.clip();
+    if (slide < 1) {
+      ctx.globalAlpha = alpha * (1 - slide);
+      choiceGlyph(bx - R * 1.3 * slide, by, size, choices[(step - 1) % n], cur);
       ctx.globalAlpha = alpha;
-      ctx.strokeStyle = C.dark;
+    }
+    choiceGlyph(bx + R * 1.3 * (1 - slide), by, size, choices[step % n], cur);
+    ctx.restore();
+    // which choice is up: a dot each, under the bubble
+    const gap = r * 0.3, dy = by + R + r * 0.24;
+    for (let k = 0; k < n; k++) {
+      ctx.fillStyle = k === step % n ? C.capDeep : 'rgba(255,241,196,0.75)';
+      ctx.beginPath();
+      ctx.arc(bx + (k - (n - 1) / 2) * gap, dy, r * (k === step % n ? 0.1 : 0.07), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /* The swipe guides: the mark each way would set, sat either side of the
+   * pressed cell, with chevrons flowing out toward them. Faint while a
+   * press or hold is under way (so a long-press teaches the swipe); once
+   * the finger goes sideways the mark rides it, the side it's heading for
+   * swells, and past SWIPE_PX that side is armed — it rings and pulses,
+   * and on release the pin drops from it into the cell. */
+  function guides(s, i, hold, alpha, now) {
+    const r = layout.r, { x, y } = at(i), D = r * 1.95;
+    const swiping = hold.kind === 'swipe';
+    const p = swiping ? Math.max(-1, Math.min(1, hold.dx / SWIPE_PX)) : 0;
+    const cur = s.mark[i];
+    const pulse = view.motion ? 0.5 + 0.5 * Math.sin(now / 90) : 1;
+    ctx.save();
+    // on a top row the bubble floats off to one side: leave that side to it
+    const spot = bubbleSpot(i), aside = !swiping && Math.abs(spot.y - y) < r ? Math.sign(spot.x - x) : 0;
+    for (const dir of [-1, 1]) {
+      if (dir === aside) continue;
+      const m = swipeMark(s, i, dir);
+      const tx = Math.max(r * 0.6, Math.min(layout.W - r * 0.6, x + dir * D));
+      const pull = Math.max(0, p * dir), armed = pull >= 1;
+      const a = alpha * (swiping ? (p * dir < 0 ? 0.3 : 0.55 + 0.45 * pull) : 1);
+      // chevrons, flowing outward from the cell
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       ctx.lineWidth = Math.max(1.5, r * 0.09);
-      ctx.beginPath(); ctx.moveTo(bx - R * 0.5, by + R * 0.5); ctx.lineTo(bx + R * 0.5, by - R * 0.5); ctx.stroke();
+      ctx.strokeStyle = RING.safe;
+      ctx.shadowColor = 'rgba(12,8,4,0.5)';
+      ctx.shadowBlur = r * 0.12;
+      const w = r * 0.13, span = Math.abs(tx - x) - r * 1.05;
+      for (let k = 0; k < 2; k++) {
+        const f = view.motion ? (now / 700 + k / 2) % 1 : 0.25 + k * 0.5;
+        const cx = x + dir * (r * 0.55 + span * f);
+        ctx.globalAlpha = a * Math.sin(Math.PI * f);
+        ctx.beginPath();
+        ctx.moveTo(cx - dir * w, y - w * 1.4); ctx.lineTo(cx, y); ctx.lineTo(cx - dir * w, y + w * 1.4);
+        ctx.stroke();
+      }
+      // the target: a pale disc holding what this way sets
+      const R = r * (0.4 + 0.14 * pull + (armed ? 0.05 * pulse : 0));
+      ctx.globalAlpha = a;
+      ctx.fillStyle = RING.safe;
+      ctx.shadowBlur = r * 0.25;
+      ctx.shadowOffsetY = r * 0.06;
+      ctx.beginPath(); ctx.arc(tx, y, R, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowColor = 'transparent';
+      if (armed) {
+        ctx.strokeStyle = C.capDeep;
+        ctx.lineWidth = Math.max(2, r * 0.1);
+        ctx.beginPath(); ctx.arc(tx, y, R + r * 0.06, 0, Math.PI * 2); ctx.stroke();
+        view.held = { cell: i, at: now, x: tx, y };
+      }
+      choiceGlyph(tx, y, R / 0.4 * 0.95, m, cur);
+    }
+    // the mark rides the finger toward the side it's heading for
+    if (swiping && Math.abs(p) > 0.12 && Math.abs(p) < 1) {
+      const dir = Math.sign(p), m = swipeMark(s, i, dir);
+      ctx.globalAlpha = alpha * (0.35 + 0.5 * Math.abs(p));
+      choiceGlyph(x + dir * Math.min(Math.abs(hold.dx), D * 0.7), y, r * (0.9 + 0.2 * Math.abs(p)), m, cur);
     }
     ctx.restore();
   }
@@ -841,16 +943,25 @@ export function createRenderer(canvas) {
       } else view.refusal = null;
     }
 
-    // the hold bubble: it rises as a press becomes a long-press
+    // the hold bubble: it rises as a press becomes a long-press, then turns
+    // through the choices; a swipe trades it for the guides at full
     const hold = view.hold;
-    if (hold && s.phase === 'play') {
-      const el = now - hold.since;
-      let show;
-      if (still) show = !stillUntil(hold.since + HOLD_SHOW);   // then at full until let go
-      else { show = el >= HOLD_SHOW / 2; moving = true; }
-      if (show) {
-        const fade = still ? 1 : clamp01((el - HOLD_SHOW / 2) / HOLD_SHOW);
-        bubble(s, hold.cell, still ? 1 : hold.t, fade, now);
+    if (hold && s.phase === 'play' && !s.open[hold.cell]) {
+      if (hold.kind === 'swipe') {
+        guides(s, hold.cell, hold, 1, now);
+        if (!still) moving = true;
+      } else {
+        const el = now - hold.since;
+        let show;
+        if (still) show = hold.kind === 'hold' || !stillUntil(hold.since + HOLD_SHOW);   // then at full until let go
+        else { show = el >= HOLD_SHOW / 2; moving = true; }
+        if (show) {
+          const fade = still ? 1 : clamp01((el - HOLD_SHOW / 2) / HOLD_SHOW);
+          guides(s, hold.cell, hold, fade * 0.55, now);
+          bubble(s, hold.cell, still && hold.kind === 'press' ? { ...hold, t: 1 } : hold, fade, now);
+          // still, the bubble's next choice needs a frame of its own
+          if (still && hold.kind === 'hold') stillUntil(now + CYCLE_MS - (hold.held % CYCLE_MS));
+        }
       }
     }
 

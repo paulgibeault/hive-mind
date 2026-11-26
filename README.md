@@ -19,7 +19,7 @@ hexagons where every frame is proven solvable without a guess. A game for
 | `migrate.js` | Stored data from older versions (old hive ids, v1 saves) brought up to date. Pure; `main.js` applies it on boot. |
 | `arcade-rng.js` | The fleet's seeded RNG — a vendored, byte-identical copy of the launcher's. Never edit it here. |
 | `render.js` | The frame, drawn on one canvas. Reads state, never writes it. |
-| `input.js` | Taps, long-presses, right-clicks and keys → cell commands. |
+| `input.js` | Taps, long-presses, swipes, right-clicks and keys → cell commands. |
 | `main.js` | The sheets, the clock, the daily, and the Arcade SDK contract. |
 | `soundpack.js`, `audio.js`, `mixer.js` | The sound pack (WebAudio graphs, one instrument per hive), its one registration site, and the pure mixer (no-tells param filter, throttle, variant rotation, scale rung). |
 | `tools/stage.mjs`, `sw.js`, `.github/workflows/pages.yml` | The fleet CI/CD standard (launcher `GAME_INTEGRATION.md` §10, §13a). `tools/verify-artifact.mjs` and `tools/inject-precache.mjs` are vendored fleet files — never edit them here. |

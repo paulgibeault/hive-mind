@@ -224,10 +224,22 @@ again until nothing more follows.
 
 ## Controls
 
-Tap uncaps, or sweeps a number. Long-press (380 ms) or right-click marks,
-cycling none → guard (→ queen's guard in Apple Orchard) → none. The flag button on the
-rail makes taps mark, for anyone who finds long-press awkward. A press that
-drifts more than 12 px is dropped as a mis-touch. Keys: P / Esc to pause,
+Tap uncaps, or sweeps a number. Two ways to mark:
+
+- **Swipe** (the fast way): a sideways drag past 34 px. Right sets a guard;
+  left a queen's guard in Apple Orchard, or clears where there are no
+  queens. Swiping to the mark already there lifts it. Guides either side of
+  the cell show what each way sets, chevrons flowing out to them; the mark
+  rides the finger and the side it heads for arms.
+- **Hold** (the simple way): past 380 ms the bubble turns slowly through the
+  cell's marks, 850 ms each, starting with what a tap-mark would set (so a
+  short hold still means "the next mark") and ending on the mark already
+  there. Letting go places the one showing. The guides show faintly under a
+  hold, so holding teaches the swipe.
+
+Right-click cycles none → guard (→ queen's guard) → none, and the flag
+button on the rail makes taps do the same. A press that drifts up or down
+more than 12 px is dropped as a mis-touch. Keys: P / Esc to pause,
 M to switch mark mode, H for the bee-line hint (Esc closes an open hint
 before it pauses). The hint (#07, `hint.js`) rings the clues of one proven
 move, then lights the move and says why; it costs +10 s and the Pure seal.

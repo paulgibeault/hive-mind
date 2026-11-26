@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as C from '../core.js';
 import { neighbours, ring2, centre, cellAt } from '../hex.js';
 import { makeRng } from '../arcade-rng.js';
+import { cycleAt, CYCLE_MS } from '../input.js';
 
 test('arcade-rng is the fleet algorithm (known-answer vector, GAME_INTEGRATION §7c)', () => {
   const r = makeRng(42);
@@ -123,6 +124,50 @@ test('marks: cycle per hive, protect a cell, and are dropped when a flood opens 
   const h2 = o.open.findIndex((v) => !v);
   C.mark(o, h2); C.mark(o, h2); assert.equal(o.mark[h2], C.MARK_Q);
   C.mark(o, h2); assert.equal(o.mark[h2], C.NONE);
+});
+
+test('a hold turns through every mark, starting where a tap-mark would and ending on the mark there', () => {
+  const s = C.newGame('clover', 7), i = s.open.findIndex((v) => !v);
+  assert.deepEqual(C.holdChoices(s, i), [C.MARK_G, C.NONE]);
+  C.setMark(s, i, C.MARK_G);
+  assert.deepEqual(C.holdChoices(s, i), [C.NONE, C.MARK_G]);
+
+  const o = C.newGame('apple', 5), j = o.open.findIndex((v) => !v);
+  assert.deepEqual(C.holdChoices(o, j), [C.MARK_G, C.MARK_Q, C.NONE]);
+  C.setMark(o, j, C.MARK_Q);
+  assert.deepEqual(C.holdChoices(o, j), [C.NONE, C.MARK_G, C.MARK_Q]);
+
+  // the choice showing: the first at once, each for CYCLE_MS, round again
+  const ch = [C.MARK_G, C.MARK_Q, C.NONE];
+  assert.equal(cycleAt(ch, 0), C.MARK_G);
+  assert.equal(cycleAt(ch, CYCLE_MS - 1), C.MARK_G);
+  assert.equal(cycleAt(ch, CYCLE_MS), C.MARK_Q);
+  assert.equal(cycleAt(ch, CYCLE_MS * 2 + 5), C.NONE);
+  assert.equal(cycleAt(ch, CYCLE_MS * 3), C.MARK_G);
+});
+
+test('a swipe: right a guard, left a queen\'s guard (or clear, without queens); again lifts it', () => {
+  const o = C.newGame('apple', 5), j = o.open.findIndex((v) => !v);
+  assert.equal(C.swipeMark(o, j, 1), C.MARK_G);
+  assert.equal(C.swipeMark(o, j, -1), C.MARK_Q);
+  C.setMark(o, j, C.MARK_G);
+  assert.equal(C.swipeMark(o, j, 1), C.NONE, 'the same way again lifts it');
+  assert.equal(C.swipeMark(o, j, -1), C.MARK_Q, 'the other way swaps it');
+
+  const s = C.newGame('clover', 7), i = s.open.findIndex((v) => !v);
+  assert.equal(C.swipeMark(s, i, -1), C.NONE);
+  C.setMark(s, i, C.MARK_G);
+  assert.equal(C.swipeMark(s, i, -1), C.NONE, 'left clears where there are no queens');
+  assert.equal(C.swipeMark(s, i, 1), C.NONE);
+});
+
+test('setting the mark already there is no move', () => {
+  const s = C.newGame('clover', 7), i = s.open.findIndex((v) => !v);
+  s.events.length = 0;
+  assert.equal(C.setMark(s, i, C.NONE), false);
+  assert.equal(s.events.length, 0);
+  assert.equal(C.setMark(s, i, C.MARK_G), true);
+  assert.equal(C.setMark(s, i, C.MARK_G), false);
 });
 
 test('playing the frame out by truth wins it, and sweeping works on plain numbers', () => {
