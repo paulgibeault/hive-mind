@@ -288,9 +288,31 @@ export function mark(s, i) {
   return true;
 }
 
-/** Set a mark directly (for a long-press menu or a keyboard). */
+/** The marks a hidden cell can take, in cycle order. */
+export function markCycle(s) {
+  return s.queens > 0 ? [NONE, MARK_G, MARK_Q] : [NONE, MARK_G];
+}
+
+/** What a long-press on cell i offers, in turn: every mark the cell can
+ *  take, starting with the one a tap-mark would set and ending on the one
+ *  already there (so letting go on it changes nothing). */
+export function holdChoices(s, i) {
+  const c = markCycle(s), k = c.indexOf(s.mark[i]);
+  return [...c.slice(k + 1), ...c.slice(0, k + 1)];
+}
+
+/** What a sideways swipe on cell i sets: right (dir > 0) a guard; left a
+ *  queen's guard, or — where there are no queens — clears it. Swiping to
+ *  the mark already there lifts it. */
+export function swipeMark(s, i, dir) {
+  const m = dir > 0 ? MARK_G : s.queens > 0 ? MARK_Q : NONE;
+  return s.mark[i] === m ? NONE : m;
+}
+
+/** Set a mark directly (a long-press's choice, or a swipe). Setting the
+ *  mark already there is no move. */
 export function setMark(s, i, m) {
-  if (s.phase !== 'play' || s.open[i]) return false;
+  if (s.phase !== 'play' || s.open[i] || s.mark[i] === m) return false;
   s.mark[i] = m;
   s.events.push({ type: 'mark', cell: i, mark: m });
   return true;

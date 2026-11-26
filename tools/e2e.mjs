@@ -119,6 +119,40 @@ assert.equal(await H((i) => window.__hive.s.open[i], target), 0, 'a marked cell 
 await holdCell(target);
 assert.equal(await H((i) => window.__hive.s.mark[i], target), 0);
 
+// a long hold turns the bubble: let go on the second choice (a queen's guard)
+{
+  const p = await xy(target);
+  await page.mouse.move(p.x, p.y); await page.mouse.down();
+  await page.waitForTimeout(380 + 850 + 300);
+  const hold = await H(() => window.__hive.view.hold);
+  assert.equal(hold.kind, 'hold');
+  await shot('2b-hold-cycle');
+  await page.mouse.up();
+  assert.equal(await H((i) => window.__hive.s.mark[i], target), 2, 'released on the second choice');
+}
+// swipes: right a guard, left a queen's guard, right again over a guard lifts it
+async function swipeCell(i, dx, peek) {
+  const p = await xy(i);
+  await page.mouse.move(p.x, p.y); await page.mouse.down();
+  await page.mouse.move(p.x + dx / 2, p.y, { steps: 4 });
+  await page.mouse.move(p.x + dx, p.y, { steps: 4 });
+  if (peek) await peek();
+  await page.mouse.up();
+}
+await swipeCell(target, 60, async () => {
+  const hold = await H(() => window.__hive.view.hold);
+  assert.equal(hold.kind, 'swipe'); assert.ok(hold.dx >= 34, `swipe dx ${hold.dx}`);
+  await shot('2c-swipe');
+});
+assert.equal(await H((i) => window.__hive.s.mark[i], target), 1, 'swipe right: a guard');
+await swipeCell(target, -60);
+assert.equal(await H((i) => window.__hive.s.mark[i], target), 2, "swipe left: a queen's guard");
+await swipeCell(target, -20);
+assert.equal(await H((i) => window.__hive.s.mark[i], target), 2, 'a short swipe does nothing');
+await swipeCell(target, -60);
+assert.equal(await H((i) => window.__hive.s.mark[i], target), 0, 'the same way again lifts it');
+assert.equal(await H((i) => window.__hive.s.open[i], target), 0, 'a swipe never uncaps');
+
 // mark mode: taps mark
 await page.click('#tool');
 await tapCell(target);
@@ -462,7 +496,7 @@ const capped = await H(() => window.__hive.s.open.findIndex((o, i) => !o && !win
   assert.ok(hold.t > 0.3 && hold.t < 1, `hold progress ${hold.t}`);
   await page.waitForTimeout(280); await page.mouse.up();
   assert.equal(await H((i) => window.__hive.s.mark[i], capped), 1);
-  assert.equal(await H(() => window.__hive.view.hold), null, 'the bubble goes once the mark is in');
+  await page.waitForFunction(() => window.__hive.view.hold === null, null, { timeout: 1000 });   // the bubble goes with the next frame once the mark is in
   await holdCell(capped);   // and back off
 }
 

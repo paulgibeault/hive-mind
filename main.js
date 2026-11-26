@@ -9,7 +9,7 @@
 import * as Core from './core.js';
 import { migrate, recordKeys } from './migrate.js';
 import { createRenderer } from './render.js';
-import { bindInput } from './input.js';
+import { bindInput, cycleAt } from './input.js';
 import { initAudio, sfx, sfxReset, cueContext } from './audio.js';
 import { refused } from './juice.js';
 import * as Reads from './reads.js';
@@ -849,6 +849,9 @@ function act(fn, i) {
   persistRun();
 }
 
+/** Put mark m on cell i — a long-press's choice, or a swipe's. */
+function place(i, m) { act((st, k) => Core.setMark(st, k, m), i); }
+
 function pause() {
   if (mode === 'play') { persistRun(); show('paused'); }
   else if (mode === 'paused') show('play');
@@ -986,11 +989,13 @@ async function boot() {
 
   input = bindInput($('view'), {
     active: () => mode === 'play',
-    onPress: kick,                                   // the hold ring starts or ends
+    onPress: kick,                                   // a press, hold or swipe moves on
     cellAt: (x, y) => R.cellAt(x, y),
     markMode: () => markMode,
     onTap: (i) => act(Core.tap, i),
     onMark: (i) => act(Core.mark, i),
+    onHold: (i, ms) => s && place(i, cycleAt(Core.holdChoices(s, i), ms)),   // the choice showing as it's let go
+    onSwipe: (i, dir) => s && place(i, Core.swipeMark(s, i, dir)),
     onPause: pause,
     onToggle: () => { markMode = !markMode; renderHud(); },
     onHint: hintStep,
